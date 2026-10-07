@@ -1,0 +1,22 @@
+{
+  "SchemaVersion": 2,
+  "Proxy": "http://127.0.0.1:7890",
+  "ExpectedIPv4": "192.0.2.10",
+  "ExpectedCountry": "TW",
+  "ProbeTimeoutSeconds": 4,
+  "CheckIntervalSeconds": 10,
+  "ProbeUrls": [
+    "https://api.anthropic.com/cdn-cgi/trace",
+    "https://claude.ai/cdn-cgi/trace"
+  ],
+  "CodePath": "C:\\Path\\To\\ClaudeCode\\claude.exe",
+  "DesktopPath": "C:\\Path\\To\\ClaudeDesktop\\claude.exe",
+  "ProtectedPrograms": [],
+  "FlClashDirectory": "C:\\Path\\To\\FlClash",
+  "PythonPath": "C:\\Path\\To\\Python\\python.exe",
+  "RoutingPin": {
+    "ProfileId": "REPLACE_WITH_YOUR_PROFILE_ID",
+    "SelectedNodeSHA256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "RequireBrowserUDP": true
+}

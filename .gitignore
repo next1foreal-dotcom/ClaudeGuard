@@ -1,0 +1,16 @@
+# Machine-specific approved egress, executable paths and routing pins
+/guard-config.json
+# Local probes, browser profiles, logs, receipts and UI preferences
+.state/
+work/
+outputs/
+__pycache__/
+*.py[cod]
+*.log
+*.err
+*.signal
+.env
+.env.*
+*.pem
+*.key
+*.pfx
