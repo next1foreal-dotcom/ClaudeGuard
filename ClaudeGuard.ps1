@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Check','Launch','Install','Remove')][string]$Mode='Check',
-    [ValidateSet('Code','Desktop')][string]$Client='Code',
+    [ValidateSet('Code','Desktop','CodexCode','CodexDesktop')][string]$Client='Code',
+    [string]$ConfigFile,
+    [string]$ReviewHash,
     [string]$StatusFile,
     [string]$StopFile,
     [Parameter(ValueFromRemainingArguments=$true)][string[]]$ClaudeArguments=@()
@@ -12,6 +14,7 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'GuardRouting.ps1')
 $state=Join-Path $PSScriptRoot '.state'
 New-Item -ItemType Directory -Path $state -Force | Out-Null
+if($ConfigFile){$script:GuardConfigPath=Get-GuardStatePath $ConfigFile}
 $config=Get-GuardConfig
 $script:GuardStatusPath=Get-GuardStatePath $StatusFile
 $script:GuardStopPath=Get-GuardStatePath $StopFile
@@ -19,15 +22,17 @@ $probe=Get-GuardProbePath
 $programs=@($config.ProtectedPrograms)+@($probe)
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $isAdmin=([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$job=$null; $mutex=$null; $ownsMutex=$false
+$job=$null; $mutex=$null; $ownsMutex=$false; $createdRules=@()
 try {
     if($Mode -eq 'Install' -or $Mode -eq 'Remove') {
         if(!$isAdmin) {
             $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
             $arguments='-NoProfile -File "'+$PSCommandPath+'" -Mode '+$Mode
+            if($ConfigFile){$arguments+=' -ConfigFile "'+$ConfigFile+'" -ReviewHash '+$ReviewHash}
             $child=Start-Process -FilePath $powershell -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -PassThru -Wait
             if($child.ExitCode -ne 0){throw ('Administrator operation failed, exit '+$child.ExitCode+'. Check .state/install-result.json.')}
-            if($Mode -eq 'Install'){$config=Get-GuardConfig; $programs=@($config.ProtectedPrograms)+@($probe); Assert-GuardInventory $config (Get-GuardInventory $config); Assert-GuardFirewall $programs; Write-Host 'Firewall protection installed and verified.' -ForegroundColor Green}
+            if($Mode -eq 'Install'){if($ConfigFile){$script:GuardConfigPath=Get-GuardStatePath $ConfigFile}
+$config=Get-GuardConfig; $programs=@($config.ProtectedPrograms)+@($probe); Assert-GuardInventory $config (Get-GuardInventory $config); Assert-GuardFirewall $programs; Write-Host 'Firewall protection installed and verified.' -ForegroundColor Green}
             else {Write-Host 'Only ClaudeGuard firewall rules were removed.'}
             exit 0
         }
@@ -36,7 +41,13 @@ try {
             Write-GuardLog 'rules-removed' 'User invoked Remove; existing proxy and IPv6 settings were not changed.'
             exit 0
         }
+        if($ConfigFile -and $config.SchemaVersion -ge 3){
+            . (Join-Path $PSScriptRoot 'GuardSetupCore.ps1')
+            $review=[pscustomobject]@{Config=$config;ReviewHash=$config.Approval.ReviewHash;Time=$config.Approval.ReviewedAt;OwnerSID=$config.Approval.OwnerSID}
+            Assert-SetupReview $review ([bool]$config.Approval.Confirmed) $ReviewHash
+        }
         $inventory=Get-GuardInventory $config
+        if($ConfigFile){Assert-GuardInventory $config $inventory}
         $programs=@($inventory.Programs)+@($probe)
         $source=Join-Path $env:SystemRoot 'System32\curl.exe'
         if(!(Test-Path -LiteralPath $probe)){Copy-Item -LiteralPath $source -Destination $probe}
@@ -45,7 +56,7 @@ try {
             if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw ('Protected program not found: '+$path)}
             $name=Get-GuardRuleName $path
             $existing=Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
-            if(!$existing){New-NetFirewallRule -Name $name -DisplayName ('ClaudeGuard: block direct - '+[IO.Path]::GetFileName($path)) -Group $script:GuardGroup -Description 'Block non-loopback IPv4/IPv6 for this executable. The approved HTTP proxy remains on 127.0.0.1:7890.' -Direction Outbound -Action Block -Enabled True -Profile Any -Program $path -Protocol Any -RemoteAddress $script:GuardRemote -PolicyStore PersistentStore | Out-Null}
+            if(!$existing){New-NetFirewallRule -Name $name -DisplayName ('ClaudeGuard: block direct - '+[IO.Path]::GetFileName($path)) -Group $script:GuardGroup -Description 'Block non-loopback IPv4/IPv6 for this executable. An explicitly configured loopback HTTP proxy remains available.' -Direction Outbound -Action Block -Enabled True -Profile Any -Program $path -Protocol Any -RemoteAddress $script:GuardRemote -PolicyStore PersistentStore | Out-Null; $createdRules+=$name}
         }
         if($config.RequireBrowserUDP){
             & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -File (Join-Path $PSScriptRoot 'BrowserUDPGuard.ps1') -Mode Install
@@ -74,11 +85,11 @@ try {
     Write-GuardLog 'preflight-pass' ($Client+'; expected egress '+$config.ExpectedIPv4+'/'+$config.ExpectedCountry)
     if($Mode -eq 'Check'){exit 0}
     if($isAdmin){throw 'Run Launch in a normal, non-administrator terminal. Only installation needs elevation.'}
-    if(@(Get-Process -Name claude -ErrorAction SilentlyContinue).Count){throw 'Claude is already running outside this launch. Close it yourself, then launch through this guard.'}
+    if(@(Get-Process -ErrorAction SilentlyContinue|Where-Object {$_.Path -and $_.Path -in $config.ProtectedPrograms}).Count){throw 'A selected client is already running outside this launch. Close it yourself, then launch through this guard.'}
     $mutex=New-Object Threading.Mutex($false,'Local\ClaudeGuard-01a1169a')
     $ownsMutex=$mutex.WaitOne(0)
     if(!$ownsMutex){throw 'Another guarded Claude session is already running.'}
-    $app=if($Client -eq 'Code'){$config.CodePath}else{$config.DesktopPath}
+    $app=if($config.SchemaVersion -ge 3){[string](@($config.Clients|Where-Object Kind -eq $Client)|Select-Object -First 1).Path}elseif($Client -eq 'Code'){$config.CodePath}else{$config.DesktopPath}
     if($app -notin $config.ProtectedPrograms){throw 'Launcher executable is not included in the protected program list.'}
     if($Client -eq 'Desktop') {
         $package=Get-AppxPackage -Name Claude
@@ -92,9 +103,9 @@ try {
         $settings=@{env=@{HTTP_PROXY=$config.Proxy;HTTPS_PROXY=$config.Proxy;ALL_PROXY=$config.Proxy;NO_PROXY='localhost,127.0.0.1,::1'}}
         [IO.File]::WriteAllText($settingsPath,($settings|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
         $launchArguments=@($ClaudeArguments)+@('--settings',$settingsPath)
-    } else {$launchArguments=@(('--proxy-server='+$config.Proxy),'--disable-quic')+@($ClaudeArguments)}
+    } elseif($Client -eq 'CodexCode'){$launchArguments=@($ClaudeArguments)} else {$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--proxy-server='+$config.Proxy+' --disable-quic';$launchArguments=@(('--proxy-server='+$config.Proxy),'--disable-quic')+@($ClaudeArguments)}
     Write-Host 'Starting Claude in a supervised window. Closing this guard also closes its Claude process tree.' -ForegroundColor Yellow
-    $job=[ClaudeGuardJob]::new([string]$app,[string[]]$launchArguments,(Get-Location).Path,($Client -eq 'Code'))
+    $job=[ClaudeGuardJob]::new([string]$app,[string[]]$launchArguments,(Get-Location).Path,($Client -in @('Code','CodexCode')))
     Write-GuardStatus 'running' 'Claude started in the supervised process job.'
     Write-GuardLog 'launched' ($Client+'; PID '+$job.ProcessId)
     $fast={if($script:GuardStopPath -and (Test-Path -LiteralPath $script:GuardStopPath)){throw 'Stop requested by the local guard UI.'}; Assert-GuardProxyPort $config; Assert-GuardRoutingUnchanged $config}
@@ -107,6 +118,7 @@ try {
     Write-Host 'Claude session ended.'
 } catch {
     if($job){$job.Dispose();$job=$null}
+    foreach($ruleName in $createdRules){Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue|Remove-NetFirewallRule -ErrorAction SilentlyContinue}
     $message=$_.Exception.Message
     if($message -eq 'Stop requested by the local guard UI.'){Write-GuardStatus 'stopped' $message}else{Write-GuardStatus 'blocked' $message}
     Write-GuardLog 'blocked-or-stopped' $message

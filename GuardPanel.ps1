@@ -101,6 +101,12 @@ function Apply-PanelSnapshot($snapshot) {
  }elseif(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){
   $controls.StatusText.Text=if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.ready}else{$labels.monitorPartial};$controls.StageText.Text=if($snapshot.WebRTC.state -eq 'warning'){$labels.rtcWarningHint}elseif($snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.udpReadyHint}else{$labels.monitorPartialHint};if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){Set-UIPresentation 'ready'}else{Set-ThemeBrush $controls.StatusText Foreground '#E7E9EA';$controls.StatusGlyph.Text='?';Set-ThemeBrush $controls.StatusGlyph Foreground '#D3AE67';Set-ThemeBrush $controls.StatusIconBackground Background '#272D32'}
  }
+ if($snapshot.Components -and !$snapshot.Components.ok -and (!$script:LastGuardVerifiedTime -or [datetimeoffset]$snapshot.Components.Time -ge $script:LastGuardVerifiedTime)){
+  $script:ready=$false;$controls.StartButton.IsEnabled=$false
+  $controls.StatusText.Text=$labels.blocked;$controls.StageText.Text=$labels.componentsChanged;Set-UIPresentation 'blocked'
+  $controls.ComponentState.Text=$labels.componentsChanged;$controls.ComponentMark.Text='!';Set-PanelTone 'Component' 'fail'
+  $controls.Details.Text=$snapshot.Components.error;$controls.FooterStatus.Text=$labels.footerBlocked
+ }
 }
 function Poll-PanelWorker {
  if(!$script:PanelProcess){return}

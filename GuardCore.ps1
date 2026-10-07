@@ -3,16 +3,21 @@ $script:GuardRoot = $PSScriptRoot
 $script:GuardGroup = 'ClaudeGuard-01a1169a'
 $script:GuardRemote = @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff')
 function Get-GuardConfig {
-    $config = Get-Content -LiteralPath (Join-Path $script:GuardRoot 'guard-config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $(if($script:GuardConfigPath){$script:GuardConfigPath}else{Join-Path $script:GuardRoot 'guard-config.json'}) -Raw -Encoding UTF8 | ConvertFrom-Json
     $uri = [uri]$config.Proxy
-    if($uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or $uri.Port -ne 7890 -or $uri.UserInfo) { throw 'Only the approved loopback HTTP proxy 127.0.0.1:7890 is accepted.' }
+    if($uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or ($uri.Port -lt 1 -or $uri.Port -gt 65535) -or $uri.UserInfo) { throw 'Only an explicit loopback HTTP proxy is accepted.' }
     $ip=[ipaddress]$config.ExpectedIPv4
     if($ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or [ipaddress]::IsLoopback($ip)) { throw 'ExpectedIPv4 must be an explicitly approved external IPv4 address.' }
     if($config.ExpectedCountry -notmatch '^[A-Z]{2}$') { throw 'ExpectedCountry must contain two uppercase letters.' }
     if($config.PSObject.Properties.Name -contains 'RequireBrowserUDP' -and $config.RequireBrowserUDP -isnot [bool]) { throw 'RequireBrowserUDP must be a boolean.' }
     if($config.ProbeTimeoutSeconds -lt 1 -or $config.ProbeTimeoutSeconds -gt 10 -or $config.CheckIntervalSeconds -lt 2 -or $config.CheckIntervalSeconds -gt 30) { throw 'Invalid timeout or check interval.' }
     $approved=@('https://api.anthropic.com/cdn-cgi/trace','https://claude.ai/cdn-cgi/trace')
-    if(@($config.ProbeUrls).Count -ne 2 -or @($config.ProbeUrls | Where-Object {$_ -notin $approved}).Count) { throw 'Unexpected trace URL.' }
+    if($config.SchemaVersion -ge 3){
+        $approved+=@('https://chatgpt.com/cdn-cgi/trace')
+        if(!$config.Approval -or !$config.Approval.Confirmed -or !@($config.Clients).Count){throw 'First-run configuration has not been explicitly confirmed.'}
+        $count=@($config.ProbeUrls).Count
+        if($count -lt 1 -or $count -gt 3 -or @($config.ProbeUrls|Where-Object{$_ -notin $approved}).Count){throw 'Unexpected trace URL.'}
+    }elseif(@($config.ProbeUrls).Count -ne 2 -or @($config.ProbeUrls | Where-Object {$_ -notin $approved}).Count){throw 'Unexpected trace URL.'}
     return $config
 }
 function Write-GuardLog([string]$event, [string]$detail) {
@@ -43,6 +48,7 @@ function Assert-GuardFirewall([string[]]$programs) {
     }
 }
 function Assert-GuardIPv6 {
+    if((Get-GuardConfig).IPv6Policy -eq 'PerProgram'){return} # Firewall assertions above verify IPv4 and IPv6 ranges.
     if(@(Get-NetAdapter -Physical | ForEach-Object {Get-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -ErrorAction Stop} | Where-Object Enabled).Count){throw 'IPv6 is enabled on a physical adapter.'}
     if(@(Get-NetRoute -AddressFamily IPv6 -ErrorAction Stop | Where-Object DestinationPrefix -eq '::/0').Count){throw 'An IPv6 default route is present.'}
 }
@@ -86,4 +92,8 @@ function Invoke-GuardWatch($job,[scriptblock]$fastCheck,[scriptblock]$fullCheck,
         }
         return [int]$job.ExitCode
     } finally {$job.Dispose()}
+}
+function Test-GuardTraceObservations($observations,[int]$expectedCount){
+ $good=@($observations|Where-Object ok)
+ return ($expectedCount -gt 0 -and $good.Count -eq $expectedCount -and @($good|ForEach-Object ip|Sort-Object -Unique).Count -eq 1 -and @($good|ForEach-Object country|Sort-Object -Unique).Count -eq 1)
 }

@@ -1,14 +1,14 @@
 # ClaudeGuard
 
-Windows 上的 Claude 网络保护启动器与常驻监测面板。当前是从已验证的本机实现整理出的源码版，尚未提供通用安装包或首次配置向导。
+Windows 上的 Claude / Codex 网络保护启动器与常驻监测面板，包含首次配置向导。当前提供源码与启动脚本，尚未制作独立安装包。
 
 ## 功能
 
 - 启动前核验程序组件、防火墙、IPv6、FlClash 路由与批准出口。
-- 对已登记的 Claude 可执行文件阻断非回环直连，并通过本机 HTTP 代理启动受管会话。
+- 对已登记客户端的可执行文件阻断非回环直连，并通过本机 HTTP 代理启动受管会话。
 - 使用 Windows Job Object 管理受管进程；代理、路由或保护核验异常时停止该会话。
 - 展示代理出口、直连对照、DNS 解析路径、隔离浏览器 WebRTC 抽检、第三方网段信誉与系统环境。
-- 可调整尺寸、置顶、切换完整面板 / Widget；灰色与浅色主题及窗口尺寸可保存。
+- 可调整尺寸、置顶、切换完整面板 / Widget；深色与半透明浅色主题及窗口尺寸可保存。
 - 启动保护核验直接展示，红绿状态区分通过与异常；隐藏滚动条，保留鼠标滚轮。
 - 可选的浏览器 / Codex UDP 直连阻断及移除入口。
 
@@ -16,22 +16,27 @@ Windows 上的 Claude 网络保护启动器与常驻监测面板。当前是从�
 
 仅支持 Windows。面板使用 Windows PowerShell 5.1、WPF 与系统 curl；路由审计需要 Python 3 和 PyYAML；隔离浏览器抽检需要 Edge 与安装于标准位置的 Node.js。
 
-当前实现绑定 FlClash 的本地配置结构，HTTP 代理校验限定为 `http://127.0.0.1:7890`。组件登记逻辑目前要求同时安装 Claude Code 和 Claude 桌面版。尚未实现自动发现端口、仅安装一种客户端的配置适配、运行时随包分发或一键新用户配置。
+配置向导支持 Windows x64 和 FlClash 的配置审计。自动发现已安装的 Claude Code、Claude Desktop、Codex CLI、Codex Desktop、常见代理客户端与回环 HTTP 端口；仅登记用户选中的原生程序，不要求同时安装两种 Claude 客户端。共享 `node.exe` 不作为客户端登记；无法解析原生入口的脚本安装会明确提示未支持。端口不限于 7890，SOCKS 端口和带账号密码的代理 URL 不接受。发现其他代理客户端不代表其路由已核验；目前启用保护仍需要有效的 FlClash 配置和所选服务共用的固定节点。
 
 此工具只保护已登记程序以及通过工具启动的受管会话。检测周期存在延迟，因此直连阻断依赖事先生效的防火墙规则。规则更新、代理自身的上游行为以及未登记程序不应被当作已经覆盖。
 
 WebRTC 抽检不代表日常浏览器或 Claude 的全部网络行为；空候选本身不证明没有泄漏。第三方信誉评分不来自 Claude，不能预测账号状态。IP 地理数据库、语言和时区也不能证明物理位置或账号安全。
 
-## 本机配置
+## 首次配置
 
-1. 将 `guard-config.example.json` 复制为 `guard-config.json`。
-2. 将示例中的出口地址、国家、Claude 路径、Python 路径、FlClash 目录、配置身份和节点指纹替换为用户明确批准的本机值。路径必须填写完整真实路径，示例不会自动展开环境变量。
-3. `192.0.2.10` 是文档示例地址，零值节点指纹不是有效批准凭证；请勿将它们直接用于实际保护。
-4. 依照本机需求预先配置 FlClash 与 IPv6。当前安装入口安装本工具的防火墙规则，不负责自动完成这些系统配置。
-5. 双击 `Install-Protection.cmd`，完成 Windows 管理员授权后安装并核验规则。
-6. 双击 `Open-ClaudeGuard.cmd` 打开面板。首次自动核验通过后，通过面板启动 Claude；也可使用 `Start-Claude-Code.cmd` 或 `Start-Claude-Desktop.cmd`。
+1. 双击 `Open-ClaudeGuard.cmd`。没有完成配置时自动进入向导，扫描已安装程序、代理客户端和 HTTP 端口。选择需要保护的程序；核对代理地址。
+2. 点击“检测出口”。工具检查 FlClash 分流与节点，要求所选服务的检测端点返回相同 IPv4 / 地区，展示出口、地区和节点。检测值不会自动变成批准值。
+3. 勾选出口确认，点击“启用保护”。再次比对检测结果后，请求一次 Windows 管理员授权，登记所选程序的 IPv4 / IPv6 非回环直连阻断规则，完成路由、出口、程序与防火墙核验，最后保存配置并进入面板。管理员操作必须由同一 Windows 用户完成。
 
-浏览器 UDP 阻断会影响相应应用的 UDP 功能。`Remove-Protection.cmd` 和 `Remove-Browser-UDP.cmd` 分别移除对应的工具规则；不会撤销此前手动修改的代理、IPv6 或定位设置。
+缺少 Python + PyYAML 时，可勾选准备工具专用组件；只通过所选 HTTP 代理从 Python / PyPI 官方文件源下载，验证 `runtime-lock.json` 的 SHA256 后安装到本地 `.state/runtime`。不修改系统 Python 或 PATH。此下载仅提供路由核验组件。
+
+配置会记住；下次直接打开面板。程序的路径、版本或文件元数据变化时，启动与会话核验会拒绝继续，提示更新保护。面板设置提供“更新保护”和“重新配置”。更新已选程序会重新请求管理员授权；出口或节点变更需重新检测和确认，工具不会自动接受新出口。
+
+先前配置保持兼容。安装或安装后核验失败不会替换旧配置；后者失败时新直连阻断规则仍保留。常驻监控使用 Windows Job Object 停止由工具启动的会话；网络断开时的直连阻断依赖已经生效的防火墙规则，不依赖轮询关闭进程。
+
+可选的浏览器 UDP 阻断会影响已发现浏览器的 UDP 功能，向导默认不启用。`Remove-Protection.cmd` 与 `Remove-Browser-UDP.cmd` 分别移除对应工具规则；不撤销此前手动修改的代理、IPv6 或定位设置。新版对所选程序同时阻断 IPv4 / IPv6 直连，不自动修改整机 IPv6 开关。
+
+`guard-config.example.json` 仅供开发或手动配置参考，文档 IP 和零值节点指纹不能用于真实保护；新用户不需要复制这个文件。
 
 ## 隐私与数据
 
@@ -53,12 +58,12 @@ UI 展示与控件回归需要本地 `guard-config.json` 和 `.state` 目录：
 ```powershell
 New-Item -ItemType Directory -Path .state -Force
 powershell.exe -NoProfile -STA -File .\ClaudeGuardUI.ps1 -UiSmokeTest
+powershell.exe -NoProfile -STA -File .\GuardSetupUI.ps1 -UiSmokeTest
+powershell.exe -NoProfile -File .\Test-GuardSetup.ps1
 ```
 
 `Test-ClaudeGuard.ps1` 是依赖真实本机配置、防火墙与网络的集成检查；不要把它当作无网络单元测试或在未配置机器上运行。静态检查和模拟事件测试不代替真实桌面操作验收。
 
 ## 后续计划
 
-- 首次配置向导：识别客户端、代理与出口，用户确认后生成配置并安装保护。
-- 解除固定端口、固定客户端组合和本机运行时路径约束。
 - 在不继承发布者机器数据的前提下制作安装包。

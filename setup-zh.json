@@ -1,0 +1,22 @@
+{
+  "discoverTitle": "准备你的保护环境",
+  "reviewTitle": "确认你的网络出口",
+  "discoverHint": "只识别已安装的程序。检测出口前不会修改防火墙。",
+  "reviewHint": "这些是本次检测结果，确认后才会登记为批准出口。",
+  "scanBusy": "正在扫描已安装的程序与代理端口…",
+  "probeBusy": "正在核验代理、分流与出口；必要时准备核验组件…",
+  "enableBusy": "正在安装保护并进行完整核验，请完成 Windows 管理员授权。",
+  "probeButton": "检测出口",
+  "enableButton": "启用保护",
+  "backButton": "返回修改",
+  "scanButton": "重新扫描",
+  "noClient": "未发现可受管启动的原生客户端，请先安装。",
+  "proxyApps": "检测到代理客户端：",
+  "unknownProxy": "未识别到客户端，请填写本机 HTTP 端口",
+  "node": "节点：",
+  "country": "地区：",
+  "programs": "将保护：",
+  "failure": "未完成：",
+  "switchLight": "切换浅色",
+  "switchDark": "切换深色"
+}

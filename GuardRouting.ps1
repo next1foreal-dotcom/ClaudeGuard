@@ -4,7 +4,7 @@ function Get-GuardRoutingSHA256([string]$path) {
 }
 function Assert-GuardRouting($config) {
     if(!$config.RoutingPin -or !$config.RoutingPin.SelectedNodeSHA256){throw 'No approved proxy node pin is recorded.'}
-    $raw=& $config.PythonPath -X utf8 (Join-Path $script:GuardRoot 'GuardRouteAudit.py') (Join-Path $script:GuardRoot 'guard-config.json')
+    $raw=& $config.PythonPath -X utf8 (Join-Path $script:GuardRoot 'GuardRouteAudit.py') $(if($script:GuardConfigPath){$script:GuardConfigPath}else{Join-Path $script:GuardRoot 'guard-config.json'})
     $code=$LASTEXITCODE
     $result=$raw|ConvertFrom-Json
     if($code -ne 0 -or !$result.ok){throw ('Routing audit failed: '+$result.error)}

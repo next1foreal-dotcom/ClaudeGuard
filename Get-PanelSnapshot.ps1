@@ -1,6 +1,7 @@
 param([string]$SnapshotPath,[string]$StopPath,[string]$RefreshPath,[switch]$Once)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'GuardCore.ps1')
+. (Join-Path $PSScriptRoot 'GuardInventory.ps1')
 . (Join-Path $PSScriptRoot 'PanelDiagnostics.ps1')
 $config=Get-GuardConfig
 $state=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '.state'))+[IO.Path]::DirectorySeparatorChar
@@ -30,6 +31,8 @@ function Write-PanelSnapshot($snapshot) {
 }
 $diagnostics=$null;$diagnosticIP='';$nextDiagnostics=[datetime]::MinValue
 while($true){
+ $components=[pscustomobject]@{ok=$true;error=$null;Time=(Get-Date).ToString('o')}
+ try{$config=Get-GuardConfig;if($config.SchemaVersion -ge 3){Assert-GuardInventory $config (Get-GuardInventory $config)}}catch{$components.ok=$false;$components.error=$_.Exception.Message}
  if($StopPath -and (Test-Path -LiteralPath $StopPath)){break}
  if($RefreshPath -and (Test-Path -LiteralPath $RefreshPath)){Remove-Item -LiteralPath $RefreshPath;$nextDiagnostics=[datetime]::MinValue}
  $direct=[pscustomobject]@{ok=$false;ip=$null;country=$null;city=$null;region=$null;org=$null;error=$null;source='ipinfo.io direct'}
@@ -52,9 +55,9 @@ while($true){
  $proxy.domains=$observations
  $good=@($observations|Where-Object ok)
  if($good.Count){$proxy.ip=$good[0].ip;$proxy.country=$good[0].country;$proxy.milliseconds=$good[0].milliseconds}
- $proxy.ok=($good.Count -eq 2 -and $good[0].ip -eq $good[1].ip -and $good[0].country -eq $good[1].country)
+ $proxy.ok=Test-GuardTraceObservations $observations @($config.ProbeUrls).Count
  $proxy.matchesPin=($proxy.ok -and $proxy.ip -eq $config.ExpectedIPv4 -and $proxy.country -eq $config.ExpectedCountry)
- if(!$proxy.ok){$proxy.error='One or both Claude-domain traces failed or disagreed.'}
+ if(!$proxy.ok){$proxy.error='Selected-client traces failed or disagreed.'}
  $proxy.Time=(Get-Date).ToString('o')
  $environment=[pscustomobject]@{timezone=$null;timezoneId=$null;language=$null;location=$null;locationService=$null}
  try{$zone=Get-TimeZone;$environment.timezone=$zone.DisplayName;$environment.timezoneId=$zone.Id}catch{}
@@ -65,7 +68,7 @@ while($true){
   $diagnostics=[pscustomobject]@{DNS=[pscustomobject]@{System=(New-PanelDiagnostic 'Windows system DNS');Proxy=(New-PanelDiagnostic 'HTTP proxy probe-domain DNS')};WebRTC=(New-PanelDiagnostic 'isolated Edge');IPReputation=(New-PanelDiagnostic 'NetCoffee third-party network cache')}
   $refreshDiagnostics=$true
  }else{$refreshDiagnostics=$false}
- $snapshot=[pscustomobject]@{Time=(Get-Date).ToString('o');WorkerPid=$PID;Direct=$direct;Proxy=$proxy;Environment=$environment;DNS=$diagnostics.DNS;WebRTC=$diagnostics.WebRTC;IPReputation=$diagnostics.IPReputation;RefreshSeconds=30;DiagnosticRefreshSeconds=600;UDPProtection=(Get-BrowserUDPStatus)}
+ $snapshot=[pscustomobject]@{Time=(Get-Date).ToString('o');WorkerPid=$PID;Components=$components;Direct=$direct;Proxy=$proxy;Environment=$environment;DNS=$diagnostics.DNS;WebRTC=$diagnostics.WebRTC;IPReputation=$diagnostics.IPReputation;RefreshSeconds=30;DiagnosticRefreshSeconds=600;UDPProtection=(Get-BrowserUDPStatus)}
  Write-PanelSnapshot $snapshot
  if($refreshDiagnostics){
   $diagnostics.DNS.System=Invoke-PanelDNS $true;Write-PanelSnapshot $snapshot

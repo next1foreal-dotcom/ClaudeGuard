@@ -78,5 +78,11 @@
   "expandPanel": "恢复完整面板",
   "shrinkWidget": "缩小为 Widget",
   "switchLight": "切换浅色",
-  "switchDark": "切换灰色"
+  "switchDark": "切换深色",
+  "launchPrefix": "启动 ",
+  "updateProtection": "更新保护",
+  "configureProtection": "重新配置…",
+  "protectedExit": "保护出口",
+  "protectedReach": "服务连通性",
+  "componentsChanged": "程序已更新 · 请更新保护"
 }

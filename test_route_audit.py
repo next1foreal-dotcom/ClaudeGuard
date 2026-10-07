@@ -41,4 +41,19 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(domain_matches('+.claude.ai','evilclaude.ai'))
         self.assertFalse(domain_matches('+.claude.ai','claude.ai.example.com'))
 
+    def test_selected_domains_and_custom_group(self):
+        self.config['proxy-groups'][0]['name']='UserSelected'
+        self.config['rules']=['DOMAIN-SUFFIX,chatgpt.com,UserSelected','MATCH,DIRECT']
+        routes,count=audit_model(self.config,{}, {'codex.exe'},target='UserSelected',domains=['chatgpt.com'])
+        self.assertEqual(len(routes),1)
+        self.assertEqual(count,2)
+    def test_selected_codex_domain_cannot_fall_back_to_direct(self):
+        self.config['proxy-groups'][0]['name']='UserSelected'
+        self.config['rules']=['DOMAIN-SUFFIX,chatgpt.com,UserSelected','MATCH,DIRECT']
+        with self.assertRaises(AuditFailure):
+            audit_model(self.config,{}, {'codex.exe'},target='UserSelected',domains=['chatgpt.com','api.openai.com'])
+    def test_unselected_client_domains_do_not_force_registration(self):
+        self.config['rules']=['DOMAIN,claude.ai,CrossGo','MATCH,DIRECT']
+        routes,count=audit_model(self.config,{}, {'claude.exe'},domains=['claude.ai'])
+        self.assertEqual(len(routes),1)
 if __name__=='__main__': unittest.main(verbosity=2)

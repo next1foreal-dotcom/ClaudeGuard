@@ -1,9 +1,17 @@
-param([switch]$RenderPreview,[switch]$UiSmokeTest,[int]$PreviewWidth=480,[int]$PreviewHeight=720)
+param([switch]$RenderPreview,[switch]$UiSmokeTest,[switch]$Reconfigure,[int]$PreviewWidth=480,[int]$PreviewHeight=720,[string]$TestConfigPath)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
 $root=$PSScriptRoot
 $labels=Get-Content -LiteralPath (Join-Path $root 'ui-zh.json') -Raw -Encoding UTF8|ConvertFrom-Json
-$config=Get-Content -LiteralPath (Join-Path $root 'guard-config.json') -Raw -Encoding UTF8|ConvertFrom-Json
+if(!$UiSmokeTest -and !$RenderPreview){
+ . (Join-Path $root 'GuardSetupCore.ps1')
+ if($Reconfigure -or (Test-SetupRequired)){
+  & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -STA -File (Join-Path $root 'GuardSetupUI.ps1') -Standalone
+  if($LASTEXITCODE -ne 0){exit 0}
+ }
+}
+if($TestConfigPath -and !$UiSmokeTest){throw 'Fixture configuration is only accepted for UI tests.'}
+$config=Get-Content -LiteralPath $(if($TestConfigPath){$TestConfigPath}else{Join-Path $root 'guard-config.json'}) -Raw -Encoding UTF8|ConvertFrom-Json
 $xml=[xml][IO.File]::ReadAllText((Join-Path $root 'ClaudeGuard.xaml'))
 $reader=New-Object Xml.XmlNodeReader $xml
 $window=[Windows.Markup.XamlReader]::Load($reader)
@@ -29,7 +37,7 @@ function Begin-Backend([string]$mode) {
  $id=[guid]::NewGuid().ToString('N')
  $script:statePath=Join-Path $root ('.state\ui-'+$id+'.json')
  $script:stopPath=Join-Path $root ('.state\stop-'+$id+'.signal')
- $client=if($controls.ClientChoice.SelectedIndex -eq 0){'Code'}else{'Desktop'}
+ $client=if($config.SchemaVersion -ge 3){[string]$config.Clients[$controls.ClientChoice.SelectedIndex].Kind}elseif($controls.ClientChoice.SelectedIndex -eq 0){'Code'}else{'Desktop'}
  $controls.StatusText.Text=if($mode -eq 'Install'){$labels.installing}else{$labels.checking}
  $controls.StageText.Text=$labels.checkingHint;$controls.ChecksText.Text=$labels.checksPending;$controls.CoverageText.Text=$labels.coverageChecking;$controls.Details.Text='';Set-UIPresentation 'checking'
  $arguments='-NoProfile -File "'+(Join-Path $root 'ClaudeGuard.ps1')+'" -Mode '+$mode+' -Client '+$client+' -StatusFile "'+$script:statePath+'" -StopFile "'+$script:stopPath+'"'
@@ -38,9 +46,20 @@ function Begin-Backend([string]$mode) {
  catch {$script:lastPhase='blocked';Set-UIPresentation 'blocked';$controls.StatusText.Text=$labels.blocked;$controls.Details.Text=$_.Exception.Message;Set-Busy $false}
 }
 $modeCode=$window.FindName('ModeCode');$modeDesktop=$window.FindName('ModeDesktop')
-$modeCode.Add_Checked({$controls.ClientChoice.SelectedIndex=0})
-$modeDesktop.Add_Checked({$controls.ClientChoice.SelectedIndex=1})
-$controls.ClientChoice.Add_SelectionChanged({if($controls.ClientChoice.SelectedIndex -eq 0){$modeCode.IsChecked=$true}else{$modeDesktop.IsChecked=$true}})
+$modeCode.Add_Checked({if($config.SchemaVersion -ge 3){return};$controls.ClientChoice.SelectedIndex=0})
+$modeDesktop.Add_Checked({if($config.SchemaVersion -ge 3){return};$controls.ClientChoice.SelectedIndex=1})
+$controls.ClientChoice.Add_SelectionChanged({if($config.SchemaVersion -ge 3){Update-ClientCaption;return};if($controls.ClientChoice.SelectedIndex -eq 0){$modeCode.IsChecked=$true}else{$modeDesktop.IsChecked=$true}})
+function Update-ClientCaption {
+ if($config.SchemaVersion -lt 3){return}
+ $index=$controls.ClientChoice.SelectedIndex
+ if($index -ge 0 -and $index -lt @($config.Clients).Count){$window.FindName('LaunchLabel').Text=$labels.launchPrefix+[string]$config.Clients[$index].Name}
+}
+if($config.SchemaVersion -ge 3){
+ $modeCode.Visibility='Collapsed';$modeDesktop.Visibility='Collapsed';if($window.FindName('ExitTitle')){$window.FindName('ExitTitle').Text=$labels.protectedExit};if($window.FindName('ReachTitle')){$window.FindName('ReachTitle').Text=$labels.protectedReach}
+ $choice=$controls.ClientChoice;$parent=$choice.Parent;$parent.Children.Remove($choice)
+ $modeCode.Parent.Children.Insert(0,$choice);$choice.Visibility='Visible';[System.Windows.Shell.WindowChrome]::SetIsHitTestVisibleInChrome($choice,$true);$choice.Width=160;$choice.Height=34;$choice.Items.Clear()
+ foreach($client in @($config.Clients)){$choice.Items.Add([string]$client.Name)|Out-Null};$choice.SelectedIndex=0;Update-ClientCaption
+}
 $window.Add_SourceInitialized({
  $result=[ordered]@{Time=(Get-Date).ToString('o');UIProcessId=$PID;Requested='Per-pixel transparent surface';AcrylicEnabled=$false;Enabled=$false;Error=$null}
  try {
@@ -89,7 +108,18 @@ $controls.WindowTopmost.Add_Unchecked({$window.Topmost=$false})
 $controls.HideIP.Add_Checked({Refresh-IP})
 $controls.HideIP.Add_Unchecked({Refresh-IP})
 $controls.CheckButton.Add_Click({Request-PanelRefresh;Begin-Backend 'Check'})
-$controls.InstallButton.Add_Click({Begin-Backend 'Install'})
+$settingsMenu=[Windows.Controls.ContextMenu]::new();$settingsMenu.SetResourceReference([Windows.Controls.Control]::BackgroundProperty,'Ink_1D2124');$settingsMenu.SetResourceReference([Windows.Controls.Control]::ForegroundProperty,'Ink_E7E9EA')
+$updateItem=[Windows.Controls.MenuItem]::new();$updateItem.Header=$labels.updateProtection;$updateItem.Add_Click({Begin-Backend 'Install'})
+$setupItem=[Windows.Controls.MenuItem]::new();$setupItem.Header=$labels.configureProtection
+$setupItem.Add_Click({
+ if($script:backend -and !$script:backend.HasExited){return}
+ $arguments='-NoProfile -STA -File "'+(Join-Path $root 'ClaudeGuardUI.ps1')+'" -Reconfigure'
+ Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden|Out-Null
+ $window.Close()
+})
+$settingsMenu.Items.Add($updateItem)|Out-Null;$settingsMenu.Items.Add($setupItem)|Out-Null
+$controls.InstallButton.ContextMenu=$settingsMenu
+$controls.InstallButton.Add_Click({$settingsMenu.PlacementTarget=$controls.InstallButton;$settingsMenu.IsOpen=$true})
 $controls.StartButton.Add_Click({Begin-Backend 'Launch'})
 $controls.StopButton.Add_Click({if($script:stopPath){[IO.File]::WriteAllText($script:stopPath,'stop');$controls.StageText.Text=$labels.stopHint;$controls.StopButton.IsEnabled=$false}})
 $timer=New-Object Windows.Threading.DispatcherTimer
@@ -136,6 +166,13 @@ $window.Add_Closing({param($sender,$e)
 Refresh-IP
 Set-UIPresentation 'unknown'
 if($UiSmokeTest){
+ if($config.SchemaVersion -ge 3){
+  if($controls.ClientChoice.Items.Count -ne @($config.Clients).Count -or $modeCode.Visibility -ne 'Collapsed'){throw 'Selected-client picker includes an unselected client.'}
+  if(![System.Windows.Shell.WindowChrome]::GetIsHitTestVisibleInChrome($controls.ClientChoice)){throw 'Selected-client picker cannot receive caption input.'}
+  foreach($index in 0..(@($config.Clients).Count-1)){$controls.ClientChoice.SelectedIndex=$index;if($window.FindName('LaunchLabel').Text -notmatch [regex]::Escape($config.Clients[$index].Name)){throw 'Launch caption points to another client.'}}
+  Set-Busy $true;if($controls.ClientChoice.IsEnabled -or $controls.StartButton.IsEnabled){throw 'Client selection changed during operation.'};Set-Busy $false
+  [pscustomobject]@{Passed=4;Failed=0;SelectedClients=$controls.ClientChoice.Items.Count;SchemaVersion=3;NetworkRequests=$false}|ConvertTo-Json;return
+ }
  $checks=New-Object Collections.Generic.List[string]
  if($controls.Values -contains $null){throw 'Missing named control.'};$checks.Add('All existing and redesigned controls are connected')
  Set-UIPresentation 'checking-firewall'
@@ -224,21 +261,25 @@ if($UiSmokeTest){
  $previousPhase=$script:lastPhase;$previousReady=$script:ready;$previousStart=$controls.StartButton.IsEnabled;$previousText=$controls.LocationState.Text
  $themeButton=$window.FindName('ThemeButton')
  $themeButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
- if($script:PanelTheme -ne 'Light' -or $window.FindName('PanelSurface').Background.Color.R -lt 230){throw 'Light theme did not replace the panel surface'}
+ if($script:PanelTheme -ne 'Light' -or $window.FindName('PanelSurface').Background.Color.A -ne 184){throw 'Light theme did not replace the panel surface'}
  Assert-PassTone $controls.LocationState;Assert-FailTone $controls.StatusText
  if($controls.LocationState.Foreground.Color.R -ne 20 -or $controls.StatusText.Foreground.Color.R -ne 188){throw 'Live status colors did not follow the light theme'}
  if($script:lastPhase -ne $previousPhase -or $script:ready -ne $previousReady -or $controls.StartButton.IsEnabled -ne $previousStart -or $controls.LocationState.Text -ne $previousText){throw 'Theme switch modified monitoring or launch state'}
  $checks.Add('Theme click updates light surface and live red green statuses without changing safety state')
  $themeButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
- if($script:PanelTheme -ne 'Dark' -or $window.FindName('PanelSurface').Background.Color.R -ne 65){throw 'Gray theme did not restore its configured surface'}
+ if($script:PanelTheme -ne 'Dark' -or $window.FindName('PanelSurface').Background.Color.R -ne 17){throw 'Dark theme did not restore its original surface'}
  Assert-PassTone $controls.LocationState;Assert-FailTone $controls.StatusText
- $checks.Add('Theme click restores gray palette with visible red green statuses')
+ $checks.Add('Theme click restores original dark palette with visible red green statuses')
  $window.FindName('EnvironmentDisclosure').IsExpanded=$false
  $protection=$window.FindName('ProtectionGroup');$protectionAncestor=$protection.Parent
  while($protectionAncestor){if($protectionAncestor -is [Windows.Controls.Expander]){throw 'Launch protection still sits inside a disclosure'};$protectionAncestor=[Windows.Media.VisualTreeHelper]::GetParent($protectionAncestor)}
  if(!$protection.IsAncestorOf($controls.ComponentState) -or !$protection.IsAncestorOf($controls.EgressState)){throw 'Verification controls were lost during relocation'}
  $checks.Add('All launch protection steps remain outside every collapsible disclosure')
- $receipt=[pscustomobject]@{Time=(Get-Date).ToString('o');Passed=$checks.Count;Failed=0;Tests=$checks.ToArray();RoutedControlEvents=$true;NetworkRequests=$false}
+  $sample.Proxy.matchesPin=$true;$sample|Add-Member NoteProperty Components ([pscustomobject]@{ok=$false;error='Fixture component changed';Time=[datetimeoffset]::Now.AddSeconds(1).ToString('o')}) -Force
+ $script:ready=$true;$controls.StartButton.IsEnabled=$true;Apply-PanelSnapshot $sample
+ if($script:ready -or $controls.StartButton.IsEnabled -or $controls.ComponentMark.Text -ne '!' -or $controls.ComponentState.Text -ne $labels.componentsChanged){throw 'Idle component update did not block launch and display refresh protection.'}
+ $checks.Add('Background component changes block start and visibly request protection update')
+$receipt=[pscustomobject]@{Time=(Get-Date).ToString('o');Passed=$checks.Count;Failed=0;Tests=$checks.ToArray();RoutedControlEvents=$true;NetworkRequests=$false}
  [IO.File]::WriteAllText((Join-Path $root '.state\presentation-tests.json'),($receipt|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
  $receipt|ConvertTo-Json -Depth 4;exit 0
 }

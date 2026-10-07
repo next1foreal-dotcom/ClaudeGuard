@@ -54,7 +54,7 @@ def require_proxy_graph(config, group):
     visit(group, set())
     return len(reached)
 
-def audit_model(config, providers, process_names, target='CrossGo'):
+def audit_model(config, providers, process_names, target='CrossGo', domains=None):
     if config.get('mode') != 'rule' or config.get('ipv6') is not False:
         raise AuditFailure('Expected rule mode with IPv6 disabled.')
     graph_count = require_proxy_graph(config, target)
@@ -76,7 +76,7 @@ def audit_model(config, providers, process_names, target='CrossGo'):
             return True
         raise AuditFailure('Cannot safely evaluate preceding rule type: ' + kind)
     routes = []
-    for host in DOMAINS:
+    for host in (domains or DOMAINS):
         found = False
         for rule in config.get('rules', []):
             parts = rule.split(',')
@@ -108,6 +108,13 @@ def audit_model(config, providers, process_names, target='CrossGo'):
             raise AuditFailure('Protected domain has no confirmed proxy rule.')
     return routes, graph_count
 
+def _accepts_model(config, providers, names, group, domains):
+    try:
+        audit_model(config, providers, names, group, domains)
+        return True
+    except AuditFailure:
+        return False
+
 def audit(root, guard_config):
     config_path = root / 'config.yaml'
     config_bytes = config_path.read_bytes()
@@ -120,14 +127,10 @@ def audit(root, guard_config):
         row = db.execute('select selected_map from profiles where id=?', (profile_id,)).fetchone()
     if not row:
         raise AuditFailure('Active profile selection is missing.')
-    selected = json.loads(row[0]).get('CrossGo')
+    selected_map = json.loads(row[0])
+    expected = guard_config.get('RoutingPin') or {}
+    target = expected.get('Group', 'CrossGo')
     nodes = {p['name']: p for p in config.get('proxies', [])}
-    if selected not in nodes:
-        raise AuditFailure('CrossGo must select a specific proxy node, not an automatic group.')
-    fingerprint = hashlib.sha256(json.dumps(nodes[selected], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-    expected = guard_config.get('RoutingPin', {})
-    if expected and (str(profile_id) != str(expected.get('ProfileId')) or fingerprint != expected.get('SelectedNodeSHA256')):
-        raise AuditFailure('Selected profile or node differs from the approved routing pin.')
     providers = {}
     provider_hashes = {}
     for name, item in config.get('rule-providers', {}).items():
@@ -138,10 +141,22 @@ def audit(root, guard_config):
         providers[name] = (item['behavior'], yaml.safe_load(data).get('payload', []))
         provider_hashes[name] = hashlib.sha256(data).hexdigest()
     names = {Path(p).name.lower() for p in guard_config['ProtectedPrograms']}
-    routes, graph_count = audit_model(config, providers, names)
+    domains = guard_config.get('ProtectedDomains') or DOMAINS
+    if not expected:
+        candidates = sorted(selected_map, key=lambda value: (value != 'CrossGo', value))
+        target = next((group for group in candidates if selected_map[group] in nodes and _accepts_model(config, providers, names, group, domains)), None)
+        if not target:
+            raise AuditFailure('Protected domains do not share a verifiable fixed-node route. Align the selected clients in FlClash first.')
+    selected = selected_map.get(target)
+    if selected not in nodes:
+        raise AuditFailure('Approved group must select a specific proxy node, not an automatic group.')
+    fingerprint = hashlib.sha256(json.dumps(nodes[selected], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if expected and (str(profile_id) != str(expected.get('ProfileId')) or fingerprint != expected.get('SelectedNodeSHA256')):
+        raise AuditFailure('Selected profile or node differs from the approved routing pin.')
+    routes, graph_count = audit_model(config, providers, names, target, domains)
     if config_path.read_bytes() != config_bytes:
         raise AuditFailure('FlClash configuration changed during the audit.')
-    return {'ok': True, 'profileId': str(profile_id), 'selectedNode': selected,
+    return {'ok': True, 'profileId': str(profile_id), 'group': target, 'selectedNode': selected,
             'selectedNodeSHA256': fingerprint, 'routes': routes, 'graphMembers': graph_count,
             'configSHA256': hashlib.sha256(config_bytes).hexdigest(), 'providerHashes': provider_hashes,
             'evidenceScope': 'Saved selection and generated configuration; not a live control-API response.'}
