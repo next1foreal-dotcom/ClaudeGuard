@@ -261,7 +261,7 @@ if($UiSmokeTest){
  $previousPhase=$script:lastPhase;$previousReady=$script:ready;$previousStart=$controls.StartButton.IsEnabled;$previousText=$controls.LocationState.Text
  $themeButton=$window.FindName('ThemeButton')
  $themeButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
- if($script:PanelTheme -ne 'Light' -or $window.FindName('PanelSurface').Background.Color.A -ne 184){throw 'Light theme did not replace the panel surface'}
+ if($script:PanelTheme -ne 'Light' -or $window.FindName('PanelSurface').Background.Color.A -ne 173){throw 'Light theme did not replace the panel surface'}
  Assert-PassTone $controls.LocationState;Assert-FailTone $controls.StatusText
  if($controls.LocationState.Foreground.Color.R -ne 20 -or $controls.StatusText.Foreground.Color.R -ne 188){throw 'Live status colors did not follow the light theme'}
  if($script:lastPhase -ne $previousPhase -or $script:ready -ne $previousReady -or $controls.StartButton.IsEnabled -ne $previousStart -or $controls.LocationState.Text -ne $previousText){throw 'Theme switch modified monitoring or launch state'}

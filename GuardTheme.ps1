@@ -7,8 +7,22 @@ function Get-PanelBrush([string]$color){
  if(!$brush){throw ('Missing theme brush: '+$key)}
  return $brush
 }
+function Set-GlassFinish([string]$theme){
+ $finish=$window.FindName('GlassTexture')
+ if(!$finish){return}
+ $finish.Visibility=if($theme -eq 'Light'){'Visible'}else{'Collapsed'}
+ if($theme -ne 'Light'){return}
+ if(!$script:GlassGrainBrush){
+  $size=64;$pixels=New-Object byte[] ($size*$size*4);$random=[Random]::new(2718)
+  for($i=0;$i -lt $pixels.Length;$i+=4){$tone=if($random.Next(2)){255}else{0};$pixels[$i]=$tone;$pixels[$i+1]=$tone;$pixels[$i+2]=$tone;$pixels[$i+3]=[byte]$random.Next(2,7)}
+  $bitmap=[Windows.Media.Imaging.BitmapSource]::Create($size,$size,96,96,[Windows.Media.PixelFormats]::Bgra32,$null,$pixels,$size*4);$bitmap.Freeze()
+  $brush=[Windows.Media.ImageBrush]::new($bitmap);$brush.TileMode='Tile';$brush.ViewportUnits='Absolute';$brush.Viewport=[Windows.Rect]::new(0,0,$size,$size);$brush.Freeze();$script:GlassGrainBrush=$brush
+ }
+ $finish.Background=$script:GlassGrainBrush
+}
 function Set-PanelTheme([ValidateSet('Dark','Light')][string]$theme,[switch]$Persist){
  $script:PanelTheme=$theme
+ Set-GlassFinish $theme
  foreach($property in $script:ThemePalette.PSObject.Properties){
   $key=$property.Name.TrimStart('#');$color=[Windows.Media.ColorConverter]::ConvertFromString($property.Value.$theme)
   $window.Resources['Tone_'+$key]=$color
@@ -20,7 +34,7 @@ function Set-PanelTheme([ValidateSet('Dark','Light')][string]$theme,[switch]$Per
  foreach($entry in @($script:ThemeBindings.Values)){$entry.Control.SetValue($entry.Property,(Get-PanelBrush $entry.Color))}
  if($Persist){[IO.File]::WriteAllText((Join-Path $root '.state\ui-theme.json'),(@{Theme=$theme}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))}
  if(!$UiSmokeTest -and !$RenderPreview){
-  [IO.File]::WriteAllText((Join-Path $root '.state\ui-theme-current.json'),(@{Time=(Get-Date).ToString('o');UIProcessId=$PID;Theme=$theme;ProtectionAlwaysExpanded=$true}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText((Join-Path $root '.state\ui-theme-current.json'),(@{Time=(Get-Date).ToString('o');UIProcessId=$PID;Theme=$theme;SurfaceAlpha=$window.FindName('PanelSurface').Background.Color.A;Surface=$window.FindName('PanelSurface').Background.Color.ToString();GlassFinish=($window.FindName('GlassTexture').Visibility -eq 'Visible');ProtectionAlwaysExpanded=$true}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
  }
 }
 function Set-ThemeBrush($control,[string]$property,[string]$color){
