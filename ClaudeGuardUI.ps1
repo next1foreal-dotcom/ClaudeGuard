@@ -16,8 +16,8 @@ $xml=[xml][IO.File]::ReadAllText((Join-Path $root 'ClaudeGuard.xaml'))
 $reader=New-Object Xml.XmlNodeReader $xml
 $window=[Windows.Markup.XamlReader]::Load($reader)
 $controls=@{}
-foreach($name in 'StatusText','StageText','Progress','IpText','CoverageText','ChecksText','LastChecked','Details','HideIP','ClientChoice','InstallButton','CheckButton','StartButton','StopButton','WindowTopmost','MinimizeButton','MaximizeButton','CloseButton','StatusGlyph','StatusIconBackground','FooterStatus','FooterDot','CountryText','ComponentState','ComponentMark','FirewallState','FirewallMark','RoutingState','RoutingMark','EgressState','EgressMark','DirectIpText','DirectCountryText','ProxyLatencyText','ClaudeReachState','ClaudeReachMark','DNSState','DNSMark','WebRTCState','WebRTCMark','ReputationState','ReputationMark','TimezoneState','LanguageState','LocationState'){$controls[$name]=$window.FindName($name)}
-$script:LastGuardVerifiedTime=$null;$script:backend=$null;$script:mode='';$script:statePath=$null;$script:stopPath=$null;$script:seenTime='';$script:ready=$false;$script:lastPhase='unknown'
+foreach($name in 'StatusText','StageText','Progress','IpText','CoverageText','ChecksText','LastChecked','Details','HideIP','ClientChoice','InstallButton','CheckButton','StartButton','WindowTopmost','CloseButton','StatusGlyph','StatusIconBackground','FooterStatus','FooterDot','CountryText','ComponentState','ComponentMark','FirewallState','FirewallMark','RoutingState','RoutingMark','EgressState','EgressMark','DirectIpText','DirectCountryText','ProxyLatencyText','ClaudeReachState','ClaudeReachMark','DNSState','DNSMark','WebRTCState','WebRTCMark','ReputationState','ReputationMark','TimezoneState','LanguageState','LocationState'){$controls[$name]=$window.FindName($name)}
+$script:LastGuardVerifiedTime=$null;$script:backend=$null;$script:mode='';$script:statePath=$null;$script:stopPath=$null;$script:seenTime='';$script:ready=$false;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false
 . (Join-Path $root 'GuardTheme.ps1')
 Restore-PanelTheme
 . (Join-Path $root 'GuardPresentation.ps1')
@@ -25,15 +25,38 @@ Restore-PanelTheme
 . (Join-Path $root 'GuardWindowLayout.ps1')
 if($UiSmokeTest){$script:PanelSnapshot=[pscustomobject]@{Direct=[pscustomobject]@{ip='192.0.2.7'};Proxy=[pscustomobject]@{ip=$config.ExpectedIPv4}}}
 function Refresh-IP {Update-PanelIPs;if($script:PanelSnapshot){Update-PanelDiagnostics $script:PanelSnapshot}}
+function Update-MainAction {
+ $stopping=($script:UIBusy -and $script:mode -eq 'Launch')
+ $button=$controls.StartButton;$caption=$window.FindName('LaunchLabel')
+ if($stopping){
+  $caption.Text=if($script:StopRequested){$labels.stoppingSession}else{$labels.stopSession}
+  Set-GuardActionIcon $button ($window.FindName('LaunchIcon')) 'square'
+  Set-ThemeBrush $button Foreground '#FF757C';Set-ThemeBrush $button Background '#45262B'
+  $button.IsEnabled=!$script:StopRequested
+ }else{
+  $caption.Text=$labels.launchPrefix+$(if($config.SchemaVersion -ge 3){[string]$config.Clients[$controls.ClientChoice.SelectedIndex].Name}else{'Claude'})
+  Set-GuardActionIcon $button ($window.FindName('LaunchIcon')) 'play'
+  Set-ThemeBrush $button Foreground '#68DA9C';Set-ThemeBrush $button Background '#183127'
+  $button.IsEnabled=(!$script:UIBusy -and $script:ready)
+ }
+ [Windows.Automation.AutomationProperties]::SetName($button,$caption.Text)
+ $button.ToolTip=if($stopping){$labels.stopSession}else{$labels.launchProtected}
+}
+function Request-ManagedStop {
+ if(!$script:UIBusy -or $script:mode -ne 'Launch' -or !$script:stopPath -or $script:StopRequested){return}
+ [IO.File]::WriteAllText($script:stopPath,'stop',[Text.UTF8Encoding]::new($false))
+ $script:StopRequested=$true;$controls.StageText.Text=$labels.stopHint;Update-MainAction
+}
 function Set-Busy([bool]$busy) {
+ $script:UIBusy=$busy
  $controls.CheckButton.IsEnabled=!$busy;$controls.InstallButton.IsEnabled=!$busy;$controls.ClientChoice.IsEnabled=!$busy;$modeCode.IsEnabled=!$busy;$modeDesktop.IsEnabled=!$busy
- $controls.StartButton.IsEnabled=(!$busy -and $script:ready)
- $controls.StopButton.IsEnabled=($busy -and $script:mode -eq 'Launch')
+ Update-MainAction
+
  $controls.Progress.Visibility=if($busy -and $script:lastPhase -ne 'running'){'Visible'}else{'Collapsed'}
 }
 function Begin-Backend([string]$mode) {
  if($script:backend -and !$script:backend.HasExited){return}
- $script:mode=$mode;$script:ready=$false;$script:lastPhase='checking';$script:seenTime=''
+ $script:mode=$mode;$script:ready=$false;$script:StopRequested=$false;$script:lastPhase='checking';$script:seenTime=''
  $id=[guid]::NewGuid().ToString('N')
  $script:statePath=Join-Path $root ('.state\ui-'+$id+'.json')
  $script:stopPath=Join-Path $root ('.state\stop-'+$id+'.signal')
@@ -52,7 +75,7 @@ $controls.ClientChoice.Add_SelectionChanged({if($config.SchemaVersion -ge 3){Upd
 function Update-ClientCaption {
  if($config.SchemaVersion -lt 3){return}
  $index=$controls.ClientChoice.SelectedIndex
- if($index -ge 0 -and $index -lt @($config.Clients).Count){$window.FindName('LaunchLabel').Text=$labels.launchPrefix+[string]$config.Clients[$index].Name}
+ if($index -ge 0 -and $index -lt @($config.Clients).Count){Update-MainAction}
 }
 if($config.SchemaVersion -ge 3){
  $modeCode.Visibility='Collapsed';$modeDesktop.Visibility='Collapsed';if($window.FindName('ExitTitle')){$window.FindName('ExitTitle').Text=$labels.protectedExit};if($window.FindName('ReachTitle')){$window.FindName('ReachTitle').Text=$labels.protectedReach}
@@ -100,11 +123,11 @@ $window.Add_SizeChanged({param($sender,$e)
  }
 })
 $window.Add_StateChanged({Sync-WindowCorners})
-$controls.MinimizeButton.Add_Click({$window.WindowState='Minimized'})
-$controls.MaximizeButton.Add_Click({$window.WindowState=if($window.WindowState -eq 'Maximized'){'Normal'}else{'Maximized'}})
+
+
 $controls.CloseButton.Add_Click({$window.Close()})
-$controls.WindowTopmost.Add_Checked({$window.Topmost=$true})
-$controls.WindowTopmost.Add_Unchecked({$window.Topmost=$false})
+$controls.WindowTopmost.Add_Checked({$window.Topmost=$true;Set-GuardButtonIcon $controls.WindowTopmost 'pin'})
+$controls.WindowTopmost.Add_Unchecked({$window.Topmost=$false;Set-GuardButtonIcon $controls.WindowTopmost 'pin-off'})
 $controls.HideIP.Add_Checked({Refresh-IP})
 $controls.HideIP.Add_Unchecked({Refresh-IP})
 $controls.CheckButton.Add_Click({Request-PanelRefresh;Begin-Backend 'Check'})
@@ -117,11 +140,14 @@ $setupItem.Add_Click({
  Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden|Out-Null
  $window.Close()
 })
+$updateItem.Icon=New-GuardIcon 'shield-check' 16 $updateItem;$setupItem.Icon=New-GuardIcon 'sliders-horizontal' 16 $setupItem
+$minimizeItem=[Windows.Controls.MenuItem]::new();$minimizeItem.Header=$labels.minimizeWindow;$minimizeItem.Icon=New-GuardIcon 'minus' 16 $minimizeItem;$minimizeItem.Add_Click({$window.WindowState='Minimized'})
 $settingsMenu.Items.Add($updateItem)|Out-Null;$settingsMenu.Items.Add($setupItem)|Out-Null
+$settingsMenu.Items.Add([Windows.Controls.Separator]::new())|Out-Null;$settingsMenu.Items.Add($minimizeItem)|Out-Null
 $controls.InstallButton.ContextMenu=$settingsMenu
 $controls.InstallButton.Add_Click({$settingsMenu.PlacementTarget=$controls.InstallButton;$settingsMenu.IsOpen=$true})
-$controls.StartButton.Add_Click({Begin-Backend 'Launch'})
-$controls.StopButton.Add_Click({if($script:stopPath){[IO.File]::WriteAllText($script:stopPath,'stop');$controls.StageText.Text=$labels.stopHint;$controls.StopButton.IsEnabled=$false}})
+$controls.StartButton.Add_Click({if($script:UIBusy -and $script:mode -eq 'Launch'){Request-ManagedStop}elseif(!$script:UIBusy -and $script:ready){Begin-Backend 'Launch'}})
+
 $timer=New-Object Windows.Threading.DispatcherTimer
 $timer.Interval=[TimeSpan]::FromMilliseconds(500)
 $timer.Add_Tick({
@@ -164,6 +190,7 @@ $window.Add_Closing({param($sender,$e)
  $timer.Stop()
 })
 Refresh-IP
+Update-MainAction
 Set-UIPresentation 'unknown'
 if($UiSmokeTest){
  if($config.SchemaVersion -ge 3){
@@ -219,7 +246,7 @@ if($UiSmokeTest){
  if($script:ready -or $controls.StartButton.IsEnabled){throw 'A new failure did not override earlier verification.'};$checks.Add('A newer failure still prevents launch after a complete verification')
  function Assert-PassTone($control){$c=$control.Foreground.Color;if($c.G -le $c.R -or $c.G -le $c.B){throw 'Verified status is not visibly green.'}}
  function Assert-FailTone($control){$c=$control.Foreground.Color;if($c.R -le ($c.G*1.5) -or $c.R -le ($c.B*1.5)){throw 'Failed status is not visibly red.'}}
- $sample.Time=([datetimeoffset]::Now).ToString('o');$sample.Proxy.Time=$sample.Time;$sample.Proxy.matchesPin=$true;$script:LastGuardVerifiedTime=$null;$script:lastPhase='unknown';$script:ready=$false
+ $sample.Time=([datetimeoffset]::Now).ToString('o');$sample.Proxy.Time=$sample.Time;$sample.Proxy.matchesPin=$true;$script:LastGuardVerifiedTime=$null;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false;$script:ready=$false
  Apply-PanelSnapshot $sample;Assert-PassTone $controls.ClaudeReachState;$checks.Add('Matching egress has a visible green status badge')
  $sample.Proxy.matchesPin=$false;Apply-PanelSnapshot $sample;Assert-FailTone $controls.ClaudeReachState;Assert-FailTone $controls.StatusText;$checks.Add('New egress failure makes both row and header red')
  $sample.Proxy.matchesPin=$true;$sample.DNS.System.state='failed';Apply-PanelSnapshot $sample;Assert-FailTone $controls.DNSState;$checks.Add('A failed nested DNS probe makes the DNS status red')
@@ -241,6 +268,12 @@ if($UiSmokeTest){
  $window.FindName('EnvironmentDisclosure').IsExpanded=$true;Update-AdaptiveWindowLayout 450 570
  if(!$window.FindName('EnvironmentDisclosure').IsExpanded){throw 'Resizing within Widget discards manually expanded details'}
  $checks.Add('Resizing within Widget preserves manual disclosure')
+ if($window.FindName('NetworkGroup').Parent -ne $script:WidgetDiagnostics -or $window.FindName('ProtectionGroup').Parent -ne $script:NetworkBody){throw 'Compact details swallowed launch verification.'}
+ $checks.Add('Widget reuses existing detail disclosure and keeps launch verification directly visible')
+ Update-AdaptiveWindowLayout 480 720
+ if($window.FindName('NetworkGroup').Parent -ne $script:NetworkBody -or $window.FindName('EnvironmentDisclosure').Content -ne $script:EnvironmentContent){throw 'Panel transition did not restore original diagnostic layout.'}
+ $checks.Add('Returning to full panel restores direct diagnostics and existing environment details')
+ Update-AdaptiveWindowLayout 450 570
  $window.FindName('CompactButton').RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
  if($window.Height -ne 720 -or $script:AdaptiveMode -ne 'Panel'){throw 'Restore panel control failed'}
  $window.FindName('CompactButton').RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
@@ -279,6 +312,29 @@ if($UiSmokeTest){
  $script:ready=$true;$controls.StartButton.IsEnabled=$true;Apply-PanelSnapshot $sample
  if($script:ready -or $controls.StartButton.IsEnabled -or $controls.ComponentMark.Text -ne '!' -or $controls.ComponentState.Text -ne $labels.componentsChanged){throw 'Idle component update did not block launch and display refresh protection.'}
  $checks.Add('Background component changes block start and visibly request protection update')
+ if($window.FindName('StopButton') -or $window.FindName('MaximizeButton') -or $window.FindName('MinimizeButton')){throw 'Redundant standalone action remains.'}
+ if($controls.InstallButton.Parent -ne $controls.CloseButton.Parent -or $settingsMenu.Items.Count -ne 4){throw 'Settings lost an existing action during consolidation.'}
+ $checks.Add('Settings remain accessible and redundant window or stop actions are consolidated')
+ foreach($name in 'ThemeButton','CompactButton','CloseButton','InstallButton','WindowTopmost'){
+  $control=$window.FindName($name);if($control.Content -isnot [Windows.Controls.Viewbox]){throw ('Font glyph remains: '+$name)}
+ }
+ $controls.DNSMark.Text='!';$statusPath=$controls.DNSMark.Parent.Children[1].Child.Children[0]
+ if($statusPath.Data -ne $script:GuardIconGeometry['circle-alert']){throw 'Failure state did not update vector icon.'}
+ $controls.DNSMark.Text=[string][char]0x2713
+ if($statusPath.Data -ne $script:GuardIconGeometry['check']){throw 'Pass state did not update vector icon.'}
+ $checks.Add('Caption and live status icons use local vector geometry rather than fonts')
+ $script:mode='Launch';$script:StopRequested=$false;Set-Busy $true
+ if(!$controls.StartButton.IsEnabled -or $window.FindName('LaunchLabel').Text -ne $labels.stopSession){throw 'Managed stop unavailable during launch.'}
+ $script:ready=$true;$sample.Proxy.matchesPin=$false;$sample.Proxy.Time=[datetimeoffset]::Now.AddSeconds(2).ToString('o');Apply-PanelSnapshot $sample
+ if($script:ready -or !$controls.StartButton.IsEnabled){throw 'Failed observation removed stop control or retained launch permission.'}
+ $checks.Add('Managed stop remains usable when observations invalidate future launch')
+ $script:stopPath=Join-Path $root ('.state\icon-stop-test-'+[guid]::NewGuid().ToString('N')+'.signal')
+ $controls.StartButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+ if(!(Test-Path -LiteralPath $script:stopPath) -or [IO.File]::ReadAllText($script:stopPath) -ne 'stop' -or $controls.StartButton.IsEnabled -or !$script:StopRequested){throw 'Consolidated stop did not signal the owned session.'}
+ $checks.Add('Main action routes managed stop to its existing owned stop signal and prevents duplicate requests')
+ $script:mode='Check';Set-Busy $false
+ if($controls.StartButton.IsEnabled -or $window.FindName('LaunchLabel').Text -ne ($labels.launchPrefix+'Claude')){throw 'Stopped action incorrectly restores permission to launch.'}
+ $checks.Add('Idle action restores launch caption and keeps recheck requirement')
 $receipt=[pscustomobject]@{Time=(Get-Date).ToString('o');Passed=$checks.Count;Failed=0;Tests=$checks.ToArray();RoutedControlEvents=$true;NetworkRequests=$false}
  [IO.File]::WriteAllText((Join-Path $root '.state\presentation-tests.json'),($receipt|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
  $receipt|ConvertTo-Json -Depth 4;exit 0

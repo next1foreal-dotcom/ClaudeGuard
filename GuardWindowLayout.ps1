@@ -1,14 +1,32 @@
 $script:WindowMetrics=@{PanelWidth=480.0;PanelHeight=720.0;WidgetWidth=480.0;WidgetHeight=560.0;BreakpointHeight=640.0;CornerRadius=24.0}
 $script:AdaptiveMode=$null
+# Compact mode keeps all launch checks visible; detailed diagnostics reuse the existing disclosure.
+$script:NetworkBody=$window.FindName('NetworkGroup').Parent
+$script:NetworkBodyIndex=$script:NetworkBody.Children.IndexOf($window.FindName('NetworkGroup'))
+$script:EnvironmentContent=$window.FindName('EnvironmentDisclosure').Content
+$script:WidgetDiagnostics=[Windows.Controls.StackPanel]::new()
+function Set-CompactDiagnostics([bool]$compact){
+ $network=$window.FindName('NetworkGroup');$disclosure=$window.FindName('EnvironmentDisclosure')
+ if($compact -and $network.Parent -eq $script:NetworkBody){
+  $script:NetworkBody.Children.Remove($network);$disclosure.Content=$null
+  $script:WidgetDiagnostics.Children.Add($network)|Out-Null;$script:WidgetDiagnostics.Children.Add($script:EnvironmentContent)|Out-Null
+  $disclosure.Content=$script:WidgetDiagnostics
+ }elseif(!$compact -and $network.Parent -eq $script:WidgetDiagnostics){
+  $disclosure.Content=$null;$script:WidgetDiagnostics.Children.Remove($network);$script:WidgetDiagnostics.Children.Remove($script:EnvironmentContent)
+  $disclosure.Content=$script:EnvironmentContent;$script:NetworkBody.Children.Insert($script:NetworkBodyIndex,$network)
+ }
+ $window.FindName('ProtectionGroup').Margin=if($compact){'0,6,0,4'}else{'0,10,0,8'}
+}
 function Update-AdaptiveWindowLayout([double]$width,[double]$height) {
  $mode=if($height -lt $script:WindowMetrics.BreakpointHeight){'Widget'}else{'Panel'}
  if($mode -eq $script:AdaptiveMode){return}
  $script:AdaptiveMode=$mode
+ Set-CompactDiagnostics ($mode -eq 'Widget')
  $window.FindName('EnvironmentDisclosure').IsExpanded=($mode -eq 'Panel')
  $controls.StageText.TextWrapping=if($mode -eq 'Panel'){'Wrap'}else{'NoWrap'}
  $controls.StageText.TextTrimming=if($mode -eq 'Panel'){'None'}else{'CharacterEllipsis'}
  $button=$window.FindName('CompactButton')
- $button.Content=if($mode -eq 'Widget'){[string][char]0x2197}else{[string][char]0x2199}
+ Set-GuardButtonIcon $button $(if($mode -eq 'Widget'){'maximize-2'}else{'minimize-2'})
  $button.ToolTip=if($mode -eq 'Widget'){$labels.expandPanel}else{$labels.shrinkWidget}
 }
 function Toggle-PanelWidget {

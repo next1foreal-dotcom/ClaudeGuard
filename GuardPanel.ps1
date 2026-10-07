@@ -1,3 +1,7 @@
+function Invalidate-PanelLaunch {
+ $script:ready=$false
+ if(Get-Command Update-MainAction -ErrorAction SilentlyContinue){Update-MainAction}else{$controls.StartButton.IsEnabled=$false}
+}
 $script:PanelRefreshPath=$null;$script:PanelProcess=$null;$script:PanelSnapshot=$null;$script:PanelSeen='';$script:PanelStopPath=$null;$script:PanelSnapshotPath=$null
 function Get-MaskedPanelIP([string]$ip){
  if(!$ip){return [string][char]0x2014}
@@ -96,13 +100,13 @@ function Apply-PanelSnapshot($snapshot) {
  $displayTime=if($olderThanGuard){$script:LastGuardVerifiedTime}else{[datetimeoffset]$snapshot.Time}
  $controls.LastChecked.Text=$labels.updated+$displayTime.ToLocalTime().ToString('HH:mm:ss')
  if((!$olderEgress -and !$snapshot.Proxy.matchesPin) -or (!$olderUDP -and $config.RequireBrowserUDP -and !$snapshot.UDPProtection.ok)){
-  $script:ready=$false;$controls.StartButton.IsEnabled=$false
+  Invalidate-PanelLaunch
   if(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){$controls.StatusText.Text=$labels.blocked;$controls.StageText.Text=if(!$snapshot.Proxy.matchesPin){$labels.monitorEgressFailed}else{$labels.udpRuleMissing};Set-UIPresentation 'blocked';$controls.FooterStatus.Text=$labels.footerBlocked}
  }elseif(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){
   $controls.StatusText.Text=if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.ready}else{$labels.monitorPartial};$controls.StageText.Text=if($snapshot.WebRTC.state -eq 'warning'){$labels.rtcWarningHint}elseif($snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.udpReadyHint}else{$labels.monitorPartialHint};if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){Set-UIPresentation 'ready'}else{Set-ThemeBrush $controls.StatusText Foreground '#E7E9EA';$controls.StatusGlyph.Text='?';Set-ThemeBrush $controls.StatusGlyph Foreground '#D3AE67';Set-ThemeBrush $controls.StatusIconBackground Background '#272D32'}
  }
  if($snapshot.Components -and !$snapshot.Components.ok -and (!$script:LastGuardVerifiedTime -or [datetimeoffset]$snapshot.Components.Time -ge $script:LastGuardVerifiedTime)){
-  $script:ready=$false;$controls.StartButton.IsEnabled=$false
+  Invalidate-PanelLaunch
   $controls.StatusText.Text=$labels.blocked;$controls.StageText.Text=$labels.componentsChanged;Set-UIPresentation 'blocked'
   $controls.ComponentState.Text=$labels.componentsChanged;$controls.ComponentMark.Text='!';Set-PanelTone 'Component' 'fail'
   $controls.Details.Text=$snapshot.Components.error;$controls.FooterStatus.Text=$labels.footerBlocked
@@ -121,6 +125,6 @@ function Poll-PanelWorker {
   Set-ThemeBrush $controls.ClaudeReachState Foreground '#FF757C'
   Set-PanelTone 'ClaudeReach' 'fail';$controls.ClaudeReachMark.Foreground=$controls.ClaudeReachState.Foreground
   $controls.IpText.Text=[string][char]0x2014;$controls.ProxyLatencyText.Text='';$controls.CountryText.Text=$labels.monitorStale
-  $script:ready=$false;$controls.StartButton.IsEnabled=$false
+  Invalidate-PanelLaunch
  }
 }

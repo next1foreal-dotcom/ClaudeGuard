@@ -11,6 +11,7 @@ Windows 上的 Claude / Codex 网络保护启动器与常驻监测面板，包�
 - 可调整尺寸、置顶、切换完整面板 / Widget；深色与半透明浅色主题及窗口尺寸可保存。
 - 启动保护核验直接展示，红绿状态区分通过与异常；隐藏滚动条，保留鼠标滚轮。
 - 可选的浏览器 / Codex UDP 直连阻断及移除入口。
+- 本地 Lucide 矢量图标，统一描边与点击区域；设置集中于顶部，底部仅保留重新检查与启动 / 停止会话。最小化入口位于设置菜单。
 
 ## 当前要求与限制
 
@@ -67,3 +68,7 @@ powershell.exe -NoProfile -File .\Test-GuardSetup.ps1
 ## 后续计划
 
 - 在不继承发布者机器数据的前提下制作安装包。
+
+## 图标许可
+
+界面图标来自 [Lucide](https://lucide.dev/)，对应官方源版本记录在 `icons/lucide.json`。转换为 WPF 矢量几何后随程序离线加载；保留原始 ISC / MIT 许可于 `icons/LICENSE.txt`。

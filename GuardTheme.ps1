@@ -1,3 +1,4 @@
+. (Join-Path $root 'GuardIcons.ps1')
 $script:ThemePalette=Get-Content -LiteralPath (Join-Path $root 'ui-palette.json') -Raw -Encoding UTF8|ConvertFrom-Json
 $script:PanelTheme='Dark'
 $script:ThemeBindings=@{}
@@ -29,12 +30,12 @@ function Set-PanelTheme([ValidateSet('Dark','Light')][string]$theme,[switch]$Per
   $window.Resources['Ink_'+$key]=[Windows.Media.SolidColorBrush]::new($color)
  }
  $button=$window.FindName('ThemeButton')
- $button.Content=if($theme -eq 'Dark'){[string][char]0x2600}else{[string][char]0x263E}
+ Set-GuardButtonIcon $button $(if($theme -eq 'Dark'){'sun'}else{'moon'})
  $button.ToolTip=if($theme -eq 'Dark'){$labels.switchLight}else{$labels.switchDark}
  foreach($entry in @($script:ThemeBindings.Values)){$entry.Control.SetValue($entry.Property,(Get-PanelBrush $entry.Color))}
  if($Persist){[IO.File]::WriteAllText((Join-Path $root '.state\ui-theme.json'),(@{Theme=$theme}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))}
  if(!$UiSmokeTest -and !$RenderPreview){
-  [IO.File]::WriteAllText((Join-Path $root '.state\ui-theme-current.json'),(@{Time=(Get-Date).ToString('o');UIProcessId=$PID;Theme=$theme;SurfaceAlpha=$window.FindName('PanelSurface').Background.Color.A;Surface=$window.FindName('PanelSurface').Background.Color.ToString();GlassFinish=($window.FindName('GlassTexture').Visibility -eq 'Visible');ProtectionAlwaysExpanded=$true}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText((Join-Path $root '.state\ui-theme-current.json'),(@{Time=(Get-Date).ToString('o');UIProcessId=$PID;Theme=$theme;SurfaceAlpha=$window.FindName('PanelSurface').Background.Color.A;Surface=$window.FindName('PanelSurface').Background.Color.ToString();GlassFinish=($window.FindName('GlassTexture').Visibility -eq 'Visible');ProtectionAlwaysExpanded=$true;IconLibrary=$script:GuardIconAssets.Library;IconSourceCommit=$script:GuardIconAssets.Commit;LocalVectorIcons=$script:GuardIconGeometry.Count}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
  }
 }
 function Set-ThemeBrush($control,[string]$property,[string]$color){

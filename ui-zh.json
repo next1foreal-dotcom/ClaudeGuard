@@ -84,5 +84,9 @@
   "configureProtection": "重新配置…",
   "protectedExit": "保护出口",
   "protectedReach": "服务连通性",
-  "componentsChanged": "程序已更新 · 请更新保护"
+  "componentsChanged": "程序已更新 · 请更新保护",
+  "minimizeWindow": "最小化到任务栏",
+  "launchProtected": "通过保护核验后启动受管会话",
+  "stopSession": "停止会话",
+  "stoppingSession": "正在停止…"
 }

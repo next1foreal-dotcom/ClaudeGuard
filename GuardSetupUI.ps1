@@ -22,8 +22,8 @@ function Set-SetupScreen([int]$step){
  $ui.ReviewSection.Visibility=if($step -eq 2){'Visible'}else{'Collapsed'}
  $ui.SetupTitle.Text=if($step -eq 1){$labels.discoverTitle}else{$labels.reviewTitle}
  $ui.SetupHint.Text=if($step -eq 1){$labels.discoverHint}else{$labels.reviewHint}
- $ui.SetupNext.Content=if($step -eq 1){$labels.probeButton}else{$labels.enableButton}
- $ui.SetupBack.Content=if($step -eq 1){$labels.scanButton}else{$labels.backButton}
+ Set-GuardActionContent $ui.SetupNext $(if($step -eq 1){'eye'}else{'shield-check'}) $(if($step -eq 1){$labels.probeButton}else{$labels.enableButton})
+ Set-GuardActionContent $ui.SetupBack $(if($step -eq 1){'refresh-cw'}else{'arrow-left'}) $(if($step -eq 1){$labels.scanButton}else{$labels.backButton})
  Update-SetupActions
 }
 function Set-SetupDiscovery($data){
