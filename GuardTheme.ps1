@@ -11,11 +11,16 @@ function Get-PanelBrush([string]$color){
 function Set-GlassFinish([string]$theme){
  $finish=$window.FindName('GlassTexture')
  if($finish){$finish.Visibility='Collapsed';$finish.Background=$null}
- if($theme -eq 'Light'){
-  $shadow=[Windows.Media.Effects.DropShadowEffect]::new();$shadow.Color=[Windows.Media.Colors]::Black
-  $shadow.BlurRadius=3;$shadow.ShadowDepth=0;$shadow.Opacity=.95;$shadow.RenderingBias='Quality';$shadow.Freeze()
-  $window.Resources['ClearTextEffect']=$shadow
- }else{$window.Resources.Remove('ClearTextEffect')}
+ foreach($name in 'StatusReadability','ProtectionReadability','ActionsReadability','ClientReadability','EnvironmentReadability'){
+  $surface=$window.FindName($name);if(!$surface){continue}
+  $surface.Padding=if($theme -eq 'Light'){if($name -in @('ActionsReadability','ClientReadability')){'3,0'}else{'8,0'}}else{'0'}
+ }
+ $network=$window.FindName('NetworkGroup')
+ if($network){
+  $network.CornerRadius=if($theme -eq 'Light'){'10'}else{'0'}
+  $network.Padding=if($theme -eq 'Light'){'8,14,8,0'}else{'0,14,0,0'}
+ }
+ $window.Resources.Remove('ClearTextEffect')
 }
 function Set-PanelTheme([ValidateSet('Dark','Light')][string]$theme,[switch]$Persist){
  $script:PanelTheme=$theme

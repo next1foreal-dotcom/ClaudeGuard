@@ -268,7 +268,7 @@ if($UiSmokeTest){
  $window.FindName('EnvironmentDisclosure').IsExpanded=$true;Update-AdaptiveWindowLayout 450 570
  if(!$window.FindName('EnvironmentDisclosure').IsExpanded){throw 'Resizing within Widget discards manually expanded details'}
  $checks.Add('Resizing within Widget preserves manual disclosure')
- if($window.FindName('NetworkGroup').Parent -ne $script:WidgetDiagnostics -or $window.FindName('ProtectionGroup').Parent -ne $script:NetworkBody){throw 'Compact details swallowed launch verification.'}
+ if($window.FindName('NetworkGroup').Parent -ne $script:WidgetDiagnostics -or !$script:NetworkBody.IsAncestorOf($window.FindName('ProtectionGroup'))){throw 'Compact details swallowed launch verification.'}
  $checks.Add('Widget reuses existing detail disclosure and keeps launch verification directly visible')
  Update-AdaptiveWindowLayout 480 720
  if($window.FindName('NetworkGroup').Parent -ne $script:NetworkBody -or $window.FindName('EnvironmentDisclosure').Content -ne $script:EnvironmentContent){throw 'Panel transition did not restore original diagnostic layout.'}
