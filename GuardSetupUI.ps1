@@ -162,6 +162,20 @@ if($UiSmokeTest){
  Assert-SetupUI ($script:SmokeMode -eq 'Enable') 'A fresh explicitly confirmed routed action enables protection'
  $ui.SetupHint.Text=$labels.enableBusy;Show-SetupFailure 'fixture install failure'
  Assert-SetupUI ($ui.SetupHint.Text -eq $labels.reviewHint -and $ui.SetupError.Text -like '*fixture install failure') 'Other installation failures restore the review hint and retain the error'
+ foreach($theme in @('Dark','Light')){
+  Set-PanelTheme $theme;Set-SetupSurface
+  foreach($box in @($script:SetupChecks)+@($ui.PrepareRuntime,$ui.SetupUDP,$ui.ConfirmExit)){
+   $checked=$box.IsChecked;$box.IsEnabled=$true;$box.ApplyTemplate()|Out-Null
+   $surface=$box.Template.FindName('CheckSurface',$box);$mark=$box.Template.FindName('CheckMark',$box);$checkRoot=$box.Template.FindName('CheckRoot',$box);$focus=$box.Template.FindName('CheckFocus',$box)
+   $box.IsChecked=$false
+   Assert-SetupUI ($surface -and $focus -and $surface.Width -eq 18 -and $surface.CornerRadius.TopLeft -eq 5 -and $box.MinHeight -eq 28 -and $mark.Visibility -eq 'Collapsed') ($theme+' custom checkbox supports unchecked and keyboard focus states')
+   $box.IsChecked=$true
+   Assert-SetupUI ($mark.Visibility -eq 'Visible' -and $surface.Background.Color -eq (Get-PanelBrush '#183127').Color -and $surface.BorderBrush.Color -eq (Get-PanelBrush '#68DA9C').Color -and $mark.Stroke.Color -eq (Get-PanelBrush '#68DA9C').Color) ($theme+' checkbox selection follows the panel palette')
+   $box.IsEnabled=$false
+   Assert-SetupUI ($checkRoot.Opacity -eq .45 -and $box.Cursor -eq [Windows.Input.Cursors]::Arrow) ($theme+' checkbox disabled state remains distinct')
+   $box.IsEnabled=$true;$box.IsChecked=$checked
+  }
+ }
  foreach($theme in @('Dark','Light')){Set-PanelTheme $theme;Set-SetupSurface;foreach($step in @(1,2)){
   Set-SetupScreen $step;$window.Content.Measure([Windows.Size]::new(520,710));$window.Content.Arrange([Windows.Rect]::new(0,0,520,710));$window.Content.UpdateLayout()
   foreach($name in @('SetupNext','SetupBack','ThemeButton','CloseSetup')){$control=$ui[$name];$point=$control.TranslatePoint([Windows.Point]::new(0,0),$window.Content);if($point.X -lt 0 -or $point.Y -lt 0 -or ($point.X+$control.ActualWidth) -gt 521 -or ($point.Y+$control.ActualHeight) -gt 711){throw ('Layout overflow: '+$name)}}
