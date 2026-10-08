@@ -18,5 +18,8 @@
   "programs": "将保护：",
   "failure": "未完成：",
   "switchLight": "切换浅色磨砂",
-  "switchDark": "切换深色"
+  "switchDark": "切换深色",
+  "retestButton": "重新检测",
+  "expiredHint": "出口检测已过期，请重新检测并确认。",
+  "changedHint": "出口、节点或程序已变化，请重新检测并确认。"
 }

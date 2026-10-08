@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("ClaudeGuard")]
 [assembly: AssemblyProduct("ClaudeGuard")]
 [assembly: AssemblyDescription("ClaudeGuard Windows x64 launcher")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 internal sealed class BundleManifest
 {
@@ -49,9 +49,9 @@ internal sealed class LaunchOptions
 
 internal static class Program
 {
-    private const string Version = "1.0.0";
-    private const string AssemblyVersionText = "1.0.0.0";
-    private const string MutexName = "Local\\ClaudeGuard-Launcher-1.0.0";
+    private const string Version = "1.0.1";
+    private const string AssemblyVersionText = "1.0.1.0";
+    private const string MutexName = "Local\\ClaudeGuard-Launcher-1.0.1";
     private static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer();
 
     [STAThread]
