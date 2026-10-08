@@ -15,6 +15,7 @@ $config=Get-Content -LiteralPath $(if($TestConfigPath){$TestConfigPath}else{Join
 $xml=[xml][IO.File]::ReadAllText((Join-Path $root 'ClaudeGuard.xaml'))
 $reader=New-Object Xml.XmlNodeReader $xml
 $window=[Windows.Markup.XamlReader]::Load($reader)
+$appIcon=Join-Path $root 'assets\ClaudeGuard.ico';if(Test-Path -LiteralPath $appIcon){$window.Icon=[Windows.Media.Imaging.BitmapFrame]::Create([Uri]$appIcon)}
 $controls=@{}
 foreach($name in 'StatusText','StageText','Progress','IpText','CoverageText','ChecksText','LastChecked','Details','HideIP','ClientChoice','InstallButton','CheckButton','StartButton','WindowTopmost','CloseButton','StatusGlyph','StatusIconBackground','FooterStatus','FooterDot','CountryText','ComponentState','ComponentMark','FirewallState','FirewallMark','RoutingState','RoutingMark','EgressState','EgressMark','DirectIpText','DirectCountryText','ProxyLatencyText','ClaudeReachState','ClaudeReachMark','DNSState','DNSMark','WebRTCState','WebRTCMark','ReputationState','ReputationMark','TimezoneState','LanguageState','LocationState'){$controls[$name]=$window.FindName($name)}
 $script:LastGuardVerifiedTime=$null;$script:backend=$null;$script:mode='';$script:statePath=$null;$script:stopPath=$null;$script:seenTime='';$script:ready=$false;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false
@@ -131,19 +132,22 @@ $controls.WindowTopmost.Add_Unchecked({$window.Topmost=$false;Set-GuardButtonIco
 $controls.HideIP.Add_Checked({Refresh-IP})
 $controls.HideIP.Add_Unchecked({Refresh-IP})
 $controls.CheckButton.Add_Click({Request-PanelRefresh;Begin-Backend 'Check'})
-$settingsMenu=[Windows.Controls.ContextMenu]::new();$settingsMenu.SetResourceReference([Windows.Controls.Control]::BackgroundProperty,'Ink_1D2124');$settingsMenu.SetResourceReference([Windows.Controls.Control]::ForegroundProperty,'Ink_E7E9EA')
+$settingsMenu=[Windows.Controls.ContextMenu]::new();$settingsMenu.Resources=$window.Resources;$settingsMenu.Style=$window.Resources[[Windows.Controls.ContextMenu]];$settingsMenu.SetResourceReference([Windows.Controls.Control]::BackgroundProperty,'Ink_1D2124');$settingsMenu.SetResourceReference([Windows.Controls.Control]::ForegroundProperty,'Ink_E7E9EA')
 $updateItem=[Windows.Controls.MenuItem]::new();$updateItem.Header=$labels.updateProtection;$updateItem.Add_Click({Begin-Backend 'Install'})
 $setupItem=[Windows.Controls.MenuItem]::new();$setupItem.Header=$labels.configureProtection
 $setupItem.Add_Click({
  if($script:backend -and !$script:backend.HasExited){return}
  $arguments='-NoProfile -STA -File "'+(Join-Path $root 'ClaudeGuardUI.ps1')+'" -Reconfigure'
- Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden|Out-Null
+ $launcher=Join-Path $root 'ClaudeGuard.exe'
+ if(Test-Path -LiteralPath $launcher){Start-Process -FilePath $launcher -ArgumentList '--reconfigure' -WindowStyle Hidden|Out-Null}
+ else{Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden|Out-Null}
  $window.Close()
 })
 $updateItem.Icon=New-GuardIcon 'shield-check' 16 $updateItem;$setupItem.Icon=New-GuardIcon 'sliders-horizontal' 16 $setupItem
 $minimizeItem=[Windows.Controls.MenuItem]::new();$minimizeItem.Header=$labels.minimizeWindow;$minimizeItem.Icon=New-GuardIcon 'minus' 16 $minimizeItem;$minimizeItem.Add_Click({$window.WindowState='Minimized'})
 $settingsMenu.Items.Add($updateItem)|Out-Null;$settingsMenu.Items.Add($setupItem)|Out-Null
 $settingsMenu.Items.Add([Windows.Controls.Separator]::new())|Out-Null;$settingsMenu.Items.Add($minimizeItem)|Out-Null
+foreach($item in $settingsMenu.Items){$item.Style=$window.Resources[$item.GetType()]}
 $controls.InstallButton.ContextMenu=$settingsMenu
 $controls.InstallButton.Add_Click({$settingsMenu.PlacementTarget=$controls.InstallButton;$settingsMenu.IsOpen=$true})
 $controls.StartButton.Add_Click({if($script:UIBusy -and $script:mode -eq 'Launch'){Request-ManagedStop}elseif(!$script:UIBusy -and $script:ready){Begin-Backend 'Launch'}})
@@ -344,6 +348,23 @@ if($UiSmokeTest){
  $checks.Add('Failure and active-check messages remain visible after copy reduction')
  if($controls.FooterStatus.Parent.Visibility -ne 'Collapsed' -or $controls.CoverageText.Parent -isnot [Windows.Controls.DockPanel]){throw 'Duplicate footer or separate coverage summary remains.'}
  $checks.Add('Global status appears once and coverage count shares the protection heading')
+ foreach($theme in 'Dark','Light'){
+  Set-PanelTheme $theme
+  $settingsMenu.ApplyTemplate()|Out-Null;$updateItem.ApplyTemplate()|Out-Null
+  $settingsMenu.Measure([Windows.Size]::new(260,150));$settingsMenu.Arrange([Windows.Rect]::new(0,0,260,150));$settingsMenu.UpdateLayout()
+  if($updateItem.Height -ne 36 -or !$updateItem.Template.FindName('MenuIconHost',$updateItem)){throw ('Menu template did not apply: '+$theme)}
+  if($settingsMenu.MinWidth -ne 220 -or $settingsMenu.HasDropShadow){throw 'Menu reverted to native chrome.'}
+  $checks.Add($theme+' settings menu uses aligned vector icons and custom rounded rows')
+ }
+ function Begin-Backend([string]$mode){$script:SmokeLaunchMode=$mode}
+ $script:SmokeLaunchMode='';$script:mode='Check';$script:ready=$true;Set-Busy $false
+ $controls.StartButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+ if($script:SmokeLaunchMode -ne 'Launch'){throw 'Verified start button did not route to the guarded launch backend.'}
+ $checks.Add('Verified start action invokes the guarded launch backend')
+ $script:SmokeLaunchMode='';$script:ready=$false;Set-Busy $false
+ $controls.StartButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+ if($script:SmokeLaunchMode){throw 'Unverified launch bypassed the event guard.'}
+ $checks.Add('Unverified start action refuses launch even when a routed event is raised')
 $receipt=[pscustomobject]@{Time=(Get-Date).ToString('o');Passed=$checks.Count;Failed=0;Tests=$checks.ToArray();RoutedControlEvents=$true;NetworkRequests=$false}
  [IO.File]::WriteAllText((Join-Path $root '.state\presentation-tests.json'),($receipt|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
  $receipt|ConvertTo-Json -Depth 4;exit 0

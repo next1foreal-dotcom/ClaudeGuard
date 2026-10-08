@@ -14,3 +14,7 @@ __pycache__/
 *.pem
 *.key
 *.pfx
+# Candidate/release build output
+/dist/
+/packaging/.build/
+/packaging/.test/

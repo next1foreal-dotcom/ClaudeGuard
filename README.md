@@ -1,6 +1,6 @@
 # ClaudeGuard
 
-Windows 上的 Claude / Codex 网络保护启动器与常驻监测面板，包含首次配置向导。当前提供源码与启动脚本，尚未制作独立安装包。
+Windows 上的 Claude / Codex 网络保护启动器与常驻监测面板，包含首次配置向导。仓库提供源码、启动脚本及 1.0.0 单文件 Windows x64 EXE 构建流程。
 
 ## 功能
 
@@ -15,7 +15,7 @@ Windows 上的 Claude / Codex 网络保护启动器与常驻监测面板，包�
 
 ## 当前要求与限制
 
-仅支持 Windows。面板使用 Windows PowerShell 5.1、WPF 与系统 curl；路由审计需要 Python 3 和 PyYAML；隔离浏览器抽检需要 Edge 与安装于标准位置的 Node.js。
+仅支持 Windows 10 / 11 x64，需要系统 .NET Framework 4.8。面板使用 Windows PowerShell 5.1、WPF 与系统 curl；路由审计需要 Python 3 和 PyYAML；隔离浏览器抽检需要 Edge 与安装于标准位置的 Node.js。
 
 配置向导支持 Windows x64 和 FlClash 的配置审计。自动发现已安装的 Claude Code、Claude Desktop、Codex CLI、Codex Desktop、常见代理客户端与回环 HTTP 端口；仅登记用户选中的原生程序，不要求同时安装两种 Claude 客户端。共享 `node.exe` 不作为客户端登记；无法解析原生入口的脚本安装会明确提示未支持。端口不限于 7890，SOCKS 端口和带账号密码的代理 URL 不接受。发现其他代理客户端不代表其路由已核验；目前启用保护仍需要有效的 FlClash 配置和所选服务共用的固定节点。
 
@@ -25,7 +25,7 @@ WebRTC 抽检不代表日常浏览器或 Claude 的全部网络行为；空候�
 
 ## 首次配置
 
-1. 双击 `Open-ClaudeGuard.cmd`。没有完成配置时自动进入向导，扫描已安装程序、代理客户端和 HTTP 端口。选择需要保护的程序；核对代理地址。
+1. 下载私有仓库 [1.0 发布页](https://github.com/next1foreal-dotcom/ClaudeGuard/releases/tag/v1.0.0) 的 `ClaudeGuard-1.0.0-win-x64.exe` 并双击；源码用户可运行 `Open-ClaudeGuard.cmd`。没有完成配置时自动进入向导，扫描已安装程序、代理客户端和 HTTP 端口。选择需要保护的程序；核对代理地址。
 2. 点击“检测出口”。工具检查 FlClash 分流与节点，要求所选服务的检测端点返回相同 IPv4 / 地区，展示出口、地区和节点。检测值不会自动变成批准值。
 3. 勾选出口确认，点击“启用保护”。再次比对检测结果后，请求一次 Windows 管理员授权，登记所选程序的 IPv4 / IPv6 非回环直连阻断规则，完成路由、出口、程序与防火墙核验，最后保存配置并进入面板。管理员操作必须由同一 Windows 用户完成。
 
@@ -64,6 +64,21 @@ powershell.exe -NoProfile -File .\Test-GuardSetup.ps1
 ```
 
 `Test-ClaudeGuard.ps1` 是依赖真实本机配置、防火墙与网络的集成检查；不要把它当作无网络单元测试或在未配置机器上运行。静态检查和模拟事件测试不代替真实桌面操作验收。
+
+## Windows x64 EXE 发布构建
+
+`packaging\Build-Release.ps1` 构建 1.0.0 的单文件 Windows x64 GUI 启动器。脚本只把受控的运行时 allowlist、图标和许可文件嵌入 EXE；真实 `guard-config.json`、`.state`、日志、测试脚本和发布者机器数据不会进入 payload。默认要求 Git 工作区干净，候选构建可明确使用 `-AllowDirty`：
+
+```powershell
+powershell.exe -NoProfile -File .\packaging\Build-Release.ps1
+# 候选构建（会在 receipt 中记录 sourceDirty=true）
+powershell.exe -NoProfile -File .\packaging\Build-Release.ps1 -AllowDirty
+powershell.exe -NoProfile -File .\packaging\Test-Release.ps1
+```
+
+产物位于 `dist\v1.0.0-<source-sha-prefix>\`：`ClaudeGuard-1.0.0-win-x64.exe`、`SHA256SUMS`、`release-receipt.json`、`sourceSHA.txt` 和 `sourceSHA.sha256`。EXE 未数字签名，Windows 可能显示发布者未知；SHA256 用于校验下载文件。EXE 首次运行把已验证 payload 原子展开到 `%LocalAppData%\ClaudeGuard\versions\1.0.0-<payload-hash-prefix>\`，再用 Windows PowerShell 5.1 启动面板；`--reconfigure` 由 appdir 中复制的 `ClaudeGuard.exe` 转发。`--verify-only` 与 `--extract-only` 仅用于本地验收。
+
+这是源码的启动器封装，不会把可选依赖变成离线内置服务：真实路由审计仍需要 Python 3 + PyYAML，浏览器抽检仍需要 Edge 与标准位置的 Node.js；向导会按现有流程发现并提示这些依赖。构建和测试不会发起 Claude/账号网络请求，也不会修改防火墙或主机设置。
 
 ## 后续计划
 
