@@ -18,7 +18,7 @@ $window=[Windows.Markup.XamlReader]::Load($reader)
 $appIcon=Join-Path $root 'assets\ClaudeGuard.ico';if(Test-Path -LiteralPath $appIcon){$window.Icon=[Windows.Media.Imaging.BitmapFrame]::Create([Uri]$appIcon)}
 $controls=@{}
 foreach($name in 'StatusText','StageText','Progress','IpText','CoverageText','ChecksText','LastChecked','Details','HideIP','ClientChoice','InstallButton','CheckButton','StartButton','WindowTopmost','CloseButton','StatusGlyph','StatusIconBackground','FooterStatus','FooterDot','CountryText','ComponentState','ComponentMark','FirewallState','FirewallMark','RoutingState','RoutingMark','EgressState','EgressMark','DirectIpText','DirectCountryText','ProxyLatencyText','ClaudeReachState','ClaudeReachMark','DNSState','DNSMark','WebRTCState','WebRTCMark','ReputationState','ReputationMark','TimezoneState','LanguageState','LocationState'){$controls[$name]=$window.FindName($name)}
-$script:LastGuardVerifiedTime=$null;$script:backend=$null;$script:mode='';$script:statePath=$null;$script:stopPath=$null;$script:seenTime='';$script:ready=$false;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false
+$script:ClientTabs=@();$script:LastGuardVerifiedTime=$null;$script:backend=$null;$script:mode='';$script:statePath=$null;$script:stopPath=$null;$script:seenTime='';$script:ready=$false;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false
 . (Join-Path $root 'GuardTheme.ps1')
 Restore-PanelTheme
 . (Join-Path $root 'GuardPresentation.ps1')
@@ -53,6 +53,7 @@ function Set-Busy([bool]$busy) {
  $controls.CheckButton.IsEnabled=!$busy;$controls.InstallButton.IsEnabled=!$busy;$controls.ClientChoice.IsEnabled=!$busy;$modeCode.IsEnabled=!$busy;$modeDesktop.IsEnabled=!$busy
  Update-MainAction
 
+ foreach($tab in $script:ClientTabs){$tab.IsEnabled=!$busy}
  $controls.Progress.Visibility=if($busy -and $script:lastPhase -ne 'running'){'Visible'}else{'Collapsed'}
 }
 function Begin-Backend([string]$mode) {
@@ -76,13 +77,21 @@ $controls.ClientChoice.Add_SelectionChanged({if($config.SchemaVersion -ge 3){Upd
 function Update-ClientCaption {
  if($config.SchemaVersion -lt 3){return}
  $index=$controls.ClientChoice.SelectedIndex
- if($index -ge 0 -and $index -lt @($config.Clients).Count){Update-MainAction}
+ if($index -ge 0 -and $index -lt @($config.Clients).Count){foreach($tab in $script:ClientTabs){$tab.IsChecked=([int]$tab.Tag -eq $index)};Update-MainAction}
 }
 if($config.SchemaVersion -ge 3){
  $modeCode.Visibility='Collapsed';$modeDesktop.Visibility='Collapsed';if($window.FindName('ExitTitle')){$window.FindName('ExitTitle').Text=$labels.protectedExit};if($window.FindName('ReachTitle')){$window.FindName('ReachTitle').Text=$labels.protectedReach}
- $choice=$controls.ClientChoice;$parent=$choice.Parent;$parent.Children.Remove($choice)
- $modeCode.Parent.Children.Insert(0,$choice);$choice.Visibility='Visible';[System.Windows.Shell.WindowChrome]::SetIsHitTestVisibleInChrome($choice,$true);$choice.Width=160;$choice.Height=34;$choice.Items.Clear()
- foreach($client in @($config.Clients)){$choice.Items.Add([string]$client.Name)|Out-Null};$choice.SelectedIndex=0;Update-ClientCaption
+ $choice=$controls.ClientChoice;$choice.Visibility='Collapsed';$choice.Items.Clear()
+ foreach($client in @($config.Clients)){
+  $choice.Items.Add([string]$client.Name)|Out-Null
+  $tab=[Windows.Controls.RadioButton]::new();$tab.Style=$window.FindResource('ModeTab');$tab.GroupName='ProtectedClients';$tab.Tag=$choice.Items.Count-1;$tab.Width=52;$tab.Height=38;$tab.Padding='5,4';$tab.Margin='0,0,2,0';$tab.ToolTip=[string]$client.Name
+  [Windows.Automation.AutomationProperties]::SetName($tab,[string]$client.Name);[System.Windows.Shell.WindowChrome]::SetIsHitTestVisibleInChrome($tab,$true)
+  $family=if($client.Kind -in @('CodexCode','CodexDesktop')){'Codex'}else{'Claude'};$role=switch($client.Kind){'Code'{'Code'};'CodexCode'{'CLI'};default{'App'}}
+  $content=[Windows.Controls.StackPanel]::new()
+  $title=[Windows.Controls.TextBlock]::new();$title.Text=$family;$title.FontSize=11;$title.FontWeight='SemiBold';$title.HorizontalAlignment='Center';$content.Children.Add($title)|Out-Null
+  $subtitle=[Windows.Controls.TextBlock]::new();$subtitle.Text=$role;$subtitle.FontSize=10;$subtitle.HorizontalAlignment='Center';$subtitle.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty,'Ink_999EA4');$content.Children.Add($subtitle)|Out-Null
+  $tab.Content=$content;$tab.Add_Checked({param($sender,$event) $controls.ClientChoice.SelectedIndex=[int]$sender.Tag});$modeCode.Parent.Children.Add($tab)|Out-Null;$script:ClientTabs+=$tab
+ };$choice.SelectedIndex=0;Update-ClientCaption
 }
 $window.Add_SourceInitialized({
  $result=[ordered]@{Time=(Get-Date).ToString('o');UIProcessId=$PID;Requested='Per-pixel transparent surface';AcrylicEnabled=$false;Enabled=$false;Error=$null}
@@ -198,11 +207,19 @@ Update-MainAction
 Set-UIPresentation 'unknown'
 if($UiSmokeTest){
  if($config.SchemaVersion -ge 3){
-  if($controls.ClientChoice.Items.Count -ne @($config.Clients).Count -or $modeCode.Visibility -ne 'Collapsed'){throw 'Selected-client picker includes an unselected client.'}
-  if(![System.Windows.Shell.WindowChrome]::GetIsHitTestVisibleInChrome($controls.ClientChoice)){throw 'Selected-client picker cannot receive caption input.'}
-  foreach($index in 0..(@($config.Clients).Count-1)){$controls.ClientChoice.SelectedIndex=$index;if($window.FindName('LaunchLabel').Text -notmatch [regex]::Escape($config.Clients[$index].Name)){throw 'Launch caption points to another client.'}}
-  Set-Busy $true;if($controls.ClientChoice.IsEnabled -or $controls.StartButton.IsEnabled){throw 'Client selection changed during operation.'};Set-Busy $false
-  [pscustomobject]@{Passed=4;Failed=0;SelectedClients=$controls.ClientChoice.Items.Count;SchemaVersion=3;NetworkRequests=$false}|ConvertTo-Json;return
+  if($controls.ClientChoice.Visibility -ne 'Collapsed' -or $script:ClientTabs.Count -ne @($config.Clients).Count -or $modeCode.Visibility -ne 'Collapsed'){throw 'Protected clients did not retain direct tabs.'}
+  foreach($tab in $script:ClientTabs){if(![System.Windows.Shell.WindowChrome]::GetIsHitTestVisibleInChrome($tab)){throw 'Client tab cannot receive caption input.'}}
+  foreach($index in 0..(@($config.Clients).Count-1)){$script:ClientTabs[$index].IsChecked=$true;if($controls.ClientChoice.SelectedIndex -ne $index -or $window.FindName('LaunchLabel').Text -notmatch [regex]::Escape($config.Clients[$index].Name)){throw 'Client tab points to another launch backend.'}}
+  Set-Busy $true;if(@($script:ClientTabs|Where-Object IsEnabled).Count -or $controls.StartButton.IsEnabled){throw 'Client selection changed during operation.'};Set-Busy $false
+  $controls.ClientChoice.SelectedIndex=0;if(!$script:ClientTabs[0].IsChecked){throw 'Tabs lost synchronization with client selection.'}
+  $script:ready=$true;Set-UIPresentation 'ready';Update-MainAction
+  foreach($theme in @('Dark','Light')){Set-PanelTheme $theme;foreach($size in @(@(480,720),@(420,560))){
+   $width=$size[0];$height=$size[1];Update-AdaptiveWindowLayout $width $height;$window.Content.Measure([Windows.Size]::new($width,$height));$window.Content.Arrange([Windows.Rect]::new(0,0,$width,$height));$window.Content.UpdateLayout()
+   $toolbarStart=$controls.InstallButton.TranslatePoint([Windows.Point]::new(0,0),$window.Content).X
+   foreach($tab in $script:ClientTabs){$point=$tab.TranslatePoint([Windows.Point]::new(0,0),$window.Content);if($point.X -lt 0 -or $point.X+$tab.ActualWidth -gt $toolbarStart -or $point.Y+$tab.ActualHeight -gt 55){throw 'Direct client tabs overlap caption actions.'}}
+   $bitmap=[Windows.Media.Imaging.RenderTargetBitmap]::new($width,$height,96,96,[Windows.Media.PixelFormats]::Pbgra32);$bitmap.Render($window.Content);$encoder=[Windows.Media.Imaging.PngBitmapEncoder]::new();$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap));$file=[IO.File]::Create((Join-Path $root ('.state\client-tabs-'+$theme+'-'+$width+'x'+$height+'.png')));try{$encoder.Save($file)}finally{$file.Dispose()}
+  }}
+  [pscustomobject]@{Passed=9;Failed=0;SelectedClients=$script:ClientTabs.Count;SchemaVersion=3;Layouts=4;NetworkRequests=$false}|ConvertTo-Json;return
  }
  $checks=New-Object Collections.Generic.List[string]
  if($controls.Values -contains $null){throw 'Missing named control.'};$checks.Add('All existing and redesigned controls are connected')
@@ -250,7 +267,7 @@ if($UiSmokeTest){
  if($script:ready -or $controls.StartButton.IsEnabled){throw 'A new failure did not override earlier verification.'};$checks.Add('A newer failure still prevents launch after a complete verification')
  function Assert-PassTone($control){$c=$control.Foreground.Color;if($c.G -le $c.R -or $c.G -le $c.B){throw 'Verified status is not visibly green.'}}
  function Assert-FailTone($control){$c=$control.Foreground.Color;if($c.R -le ($c.G*1.5) -or $c.R -le ($c.B*1.5)){throw 'Failed status is not visibly red.'}}
- $sample.Time=([datetimeoffset]::Now).ToString('o');$sample.Proxy.Time=$sample.Time;$sample.Proxy.matchesPin=$true;$script:LastGuardVerifiedTime=$null;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false;$script:ready=$false
+ $sample.Time=([datetimeoffset]::Now).ToString('o');$sample.Proxy.Time=$sample.Time;$sample.Proxy.matchesPin=$true;$script:ClientTabs=@();$script:LastGuardVerifiedTime=$null;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false;$script:ready=$false
  Apply-PanelSnapshot $sample;Assert-PassTone $controls.ClaudeReachState;$checks.Add('Matching egress has a visible green status badge')
  $sample.Proxy.matchesPin=$false;Apply-PanelSnapshot $sample;Assert-FailTone $controls.ClaudeReachState;Assert-FailTone $controls.StatusText;$checks.Add('New egress failure makes both row and header red')
  $sample.Proxy.matchesPin=$true;$sample.DNS.System.state='failed';Apply-PanelSnapshot $sample;Assert-FailTone $controls.DNSState;$checks.Add('A failed nested DNS probe makes the DNS status red')
