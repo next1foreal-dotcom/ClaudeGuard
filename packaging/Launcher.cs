@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("ClaudeGuard")]
 [assembly: AssemblyProduct("ClaudeGuard")]
 [assembly: AssemblyDescription("ClaudeGuard Windows x64 launcher")]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyVersion("1.0.2.0")]
+[assembly: AssemblyFileVersion("1.0.2.0")]
 
 internal sealed class BundleManifest
 {
@@ -49,9 +49,9 @@ internal sealed class LaunchOptions
 
 internal static class Program
 {
-    private const string Version = "1.0.1";
-    private const string AssemblyVersionText = "1.0.1.0";
-    private const string MutexName = "Local\\ClaudeGuard-Launcher-1.0.1";
+    private const string Version = "1.0.2";
+    private const string AssemblyVersionText = "1.0.2.0";
+    private const string MutexName = "Local\\ClaudeGuard-Launcher-1.0.2";
     private static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer();
 
     [STAThread]
@@ -247,6 +247,10 @@ internal static class Program
         startInfo.CreateNoWindow = true;
         startInfo.WindowStyle = ProcessWindowStyle.Hidden;
         startInfo.WorkingDirectory = workingDirectory;
+        string nativeModules = Path.Combine(systemRoot, "WindowsPowerShell\\v1.0\\Modules");
+        string userModules = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "WindowsPowerShell\\Modules");
+        string sharedModules = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsPowerShell\\Modules");
+        startInfo.EnvironmentVariables["PSModulePath"] = String.Join(Path.PathSeparator.ToString(), new string[] { nativeModules, userModules, sharedModules });
         using (Process child = Process.Start(startInfo))
         {
             child.WaitForExit();

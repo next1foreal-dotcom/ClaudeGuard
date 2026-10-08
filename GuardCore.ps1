@@ -1,3 +1,11 @@
+# Keep Windows PowerShell child processes independent of an inherited PowerShell 7 host.
+if($PSVersionTable.PSVersion.Major -le 5){
+ $systemModules=Join-Path $PSHOME 'Modules'
+ $userModules=Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules'
+ $sharedModules=Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'
+ $env:PSModulePath=@($systemModules,$userModules,$sharedModules)-join [IO.Path]::PathSeparator
+ Import-Module (Join-Path $systemModules 'Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
+}
 $script:GuardRoot = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'GuardBrowserUDP.ps1')
 $script:GuardGroup = 'ClaudeGuard-01a1169a'

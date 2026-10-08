@@ -5,10 +5,11 @@ New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot '.state') -Force|Out
 $ResultFile=Get-GuardStatePath $ResultFile
 if(!$ResultFile){throw 'Setup result path is required.'}
 try{
+ $hostCheck=@{HashAvailable=[bool](Get-Command Get-FileHash -ErrorAction Stop);NativeModulesFirst=(($env:PSModulePath -split ';' )[0] -eq (Join-Path $PSHOME 'Modules'));ScriptSHA256=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()}
  if($Mode -eq 'Discover'){$data=Get-GuardDiscovery}
  else{$InputFile=Get-GuardStatePath $InputFile;$request=Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8|ConvertFrom-Json
   if($Mode -eq 'Probe'){$data=New-SetupCandidate $request (Get-GuardDiscovery)}else{$data=Enable-SetupCandidate $request ([bool]$Confirmed) $ReviewHash}}
- $result=@{ok=$true;Mode=$Mode;Data=$data;Time=(Get-Date).ToString('o')}
+ $result=@{ok=$true;Mode=$Mode;Data=$data;HostCheck=$hostCheck;Time=(Get-Date).ToString('o')}
 }catch{$result=@{ok=$false;Mode=$Mode;error=$_.Exception.Message;Time=(Get-Date).ToString('o')}}
 [IO.File]::WriteAllText($ResultFile,($result|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
 if(!$result.ok){exit 1}
