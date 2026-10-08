@@ -10,16 +10,12 @@ function Get-PanelBrush([string]$color){
 }
 function Set-GlassFinish([string]$theme){
  $finish=$window.FindName('GlassTexture')
- if(!$finish){return}
- $finish.Visibility=if($theme -eq 'Light'){'Visible'}else{'Collapsed'}
- if($theme -ne 'Light'){return}
- if(!$script:GlassGrainBrush){
-  $size=64;$pixels=New-Object byte[] ($size*$size*4);$random=[Random]::new(2718)
-  for($i=0;$i -lt $pixels.Length;$i+=4){$tone=if($random.Next(2)){255}else{0};$pixels[$i]=$tone;$pixels[$i+1]=$tone;$pixels[$i+2]=$tone;$pixels[$i+3]=[byte]$random.Next(2,7)}
-  $bitmap=[Windows.Media.Imaging.BitmapSource]::Create($size,$size,96,96,[Windows.Media.PixelFormats]::Bgra32,$null,$pixels,$size*4);$bitmap.Freeze()
-  $brush=[Windows.Media.ImageBrush]::new($bitmap);$brush.TileMode='Tile';$brush.ViewportUnits='Absolute';$brush.Viewport=[Windows.Rect]::new(0,0,$size,$size);$brush.Freeze();$script:GlassGrainBrush=$brush
- }
- $finish.Background=$script:GlassGrainBrush
+ if($finish){$finish.Visibility='Collapsed';$finish.Background=$null}
+ if($theme -eq 'Light'){
+  $shadow=[Windows.Media.Effects.DropShadowEffect]::new();$shadow.Color=[Windows.Media.Colors]::Black
+  $shadow.BlurRadius=3;$shadow.ShadowDepth=0;$shadow.Opacity=.95;$shadow.RenderingBias='Quality';$shadow.Freeze()
+  $window.Resources['ClearTextEffect']=$shadow
+ }else{$window.Resources.Remove('ClearTextEffect')}
 }
 function Set-PanelTheme([ValidateSet('Dark','Light')][string]$theme,[switch]$Persist){
  $script:PanelTheme=$theme

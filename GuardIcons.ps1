@@ -14,6 +14,7 @@ function New-GuardIcon([string]$name,[double]$size=18,$foregroundSource){
  $box=[Windows.Controls.Viewbox]::new();$box.Width=$size;$box.Height=$size;$box.Stretch='Uniform';$box.IsHitTestVisible=$false;$box.Tag=$name
  $canvas=[Windows.Controls.Canvas]::new();$canvas.Width=24;$canvas.Height=24
  $path=[Windows.Shapes.Path]::new();$path.Data=$script:GuardIconGeometry[$name]
+ $path.SetResourceReference([Windows.UIElement]::EffectProperty,'ClearTextEffect')
  $path.StrokeThickness=$script:GuardIconAssets.StrokeWidth;$path.StrokeStartLineCap='Round';$path.StrokeEndLineCap='Round';$path.StrokeLineJoin='Round'
  $binding=[Windows.Data.Binding]::new('Foreground');$binding.Source=$foregroundSource
  [Windows.Data.BindingOperations]::SetBinding($path,[Windows.Shapes.Shape]::StrokeProperty,$binding)|Out-Null
