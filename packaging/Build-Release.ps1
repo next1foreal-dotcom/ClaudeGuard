@@ -154,9 +154,19 @@ foreach ($relative in $payload) {
     $info = Get-Item -LiteralPath $path
     $fileEntries.Add([ordered]@{ path = $relative; length = [int64]$info.Length; sha256 = (Get-Sha256 $path) })
 }
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression,System.IO.Compression.FileSystem
 $zipPath = Join-Path $workRoot 'payload.zip'
-[IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
+$zipStream = [IO.File]::Open($zipPath, [IO.FileMode]::CreateNew)
+$archive = [IO.Compression.ZipArchive]::new($zipStream, [IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+    foreach ($relative in $payload) {
+        $entry = $archive.CreateEntry($relative, [IO.Compression.CompressionLevel]::Optimal)
+        $input = [IO.File]::OpenRead((Join-Path $stage ($relative -replace '/', '\')))
+        $output = $entry.Open()
+        try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
+    }
+}
+finally { $archive.Dispose(); $zipStream.Dispose() }
 $payloadSha = Get-Sha256 $zipPath
 $manifest = [ordered]@{
     version = $Version
