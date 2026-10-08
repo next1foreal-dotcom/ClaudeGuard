@@ -335,6 +335,15 @@ if($UiSmokeTest){
  $script:mode='Check';Set-Busy $false
  if($controls.StartButton.IsEnabled -or $window.FindName('LaunchLabel').Text -ne ($labels.launchPrefix+'Claude')){throw 'Stopped action incorrectly restores permission to launch.'}
  $checks.Add('Idle action restores launch caption and keeps recheck requirement')
+ $controls.StageText.Text=$labels.readyHint
+ $window.Content.Measure([Windows.Size]::new(480,720));$window.Content.Arrange([Windows.Rect]::new(0,0,480,720));$window.Content.UpdateLayout()
+ if($controls.StageText.Visibility -ne 'Collapsed'){throw 'Healthy explanatory hint occupies space.'}
+ $checks.Add('Healthy presentation removes repeated explanation and its layout space')
+ $controls.StageText.Text='fixture guard failure';$window.Content.UpdateLayout()
+ if($controls.StageText.Visibility -ne 'Visible' -or $controls.StageText.Text -ne 'fixture guard failure'){throw 'Concise presentation hid an error.'}
+ $checks.Add('Failure and active-check messages remain visible after copy reduction')
+ if($controls.FooterStatus.Parent.Visibility -ne 'Collapsed' -or $controls.CoverageText.Parent -isnot [Windows.Controls.DockPanel]){throw 'Duplicate footer or separate coverage summary remains.'}
+ $checks.Add('Global status appears once and coverage count shares the protection heading')
 $receipt=[pscustomobject]@{Time=(Get-Date).ToString('o');Passed=$checks.Count;Failed=0;Tests=$checks.ToArray();RoutedControlEvents=$true;NetworkRequests=$false}
  [IO.File]::WriteAllText((Join-Path $root '.state\presentation-tests.json'),($receipt|ConvertTo-Json -Depth 4),[Text.UTF8Encoding]::new($false))
  $receipt|ConvertTo-Json -Depth 4;exit 0
