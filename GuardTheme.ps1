@@ -10,7 +10,24 @@ function Get-PanelBrush([string]$color){
 }
 function Set-GlassFinish([string]$theme){
  $finish=$window.FindName('GlassTexture')
- if($finish){$finish.Visibility='Collapsed';$finish.Background=$null}
+ if($finish){
+  $finish.Visibility='Collapsed';$finish.Background=$null
+  if($theme -eq 'Light'){
+   $group=[Windows.Media.DrawingGroup]::new()
+   $wash=[Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromArgb(3,255,255,255))
+   $group.Children.Add([Windows.Media.GeometryDrawing]::new($wash,$null,[Windows.Media.RectangleGeometry]::new([Windows.Rect]::new(0,0,64,64))))
+   $random=[Random]::new(71)
+   for($i=0;$i -lt 96;$i++){
+    $tone=if($i%2 -eq 0){255}else{0}
+    $ink=[Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromArgb(7,$tone,$tone,$tone))
+    $dot=[Windows.Media.EllipseGeometry]::new([Windows.Point]::new($random.NextDouble()*64,$random.NextDouble()*64),.4,.4)
+    $group.Children.Add([Windows.Media.GeometryDrawing]::new($ink,$null,$dot))
+   }
+   $grain=[Windows.Media.DrawingBrush]::new($group)
+   $grain.TileMode='Tile';$grain.ViewportUnits='Absolute';$grain.Viewport=[Windows.Rect]::new(0,0,64,64)
+   $grain.Freeze();$finish.Background=$grain;$finish.Visibility='Visible'
+  }
+ }
  $window.Resources.Remove('ClearTextEffect')
 }
 function Set-PanelTheme([ValidateSet('Dark','Light')][string]$theme,[switch]$Persist){
