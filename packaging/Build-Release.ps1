@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.0.4'
-$AssemblyVersion = '1.0.4.0'
+$Version = '1.0.5'
+$AssemblyVersion = '1.0.5.0'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $RepoRoot 'dist' }
 

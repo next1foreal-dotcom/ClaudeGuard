@@ -40,6 +40,24 @@ function Get-PanelDiagnosticDetail($value,[string]$scope) {
  if($controls.HideIP.IsChecked){$detail=[regex]::Replace($detail,'\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b','$1.*.*')}
  return $detail
 }
+function Get-PanelNetworkDetail($dns) {
+ $detail="`n"+$labels.browserDNSUnverified
+ foreach($entry in @($dns.Browser.policies)){
+  if(!$entry){continue}
+  $mode=if($entry.state -eq 'unreadable'){$labels.probeFailed}elseif($entry.mode){$entry.mode}else{$labels.noPolicy}
+  if($entry.templateConfigured){$mode+=' / '+$labels.dohTemplateConfigured}
+  $detail+="`n"+$entry.browser+' / '+$entry.source+': '+$mode
+ }
+ if($dns.Paths){
+  $detail+="`n"+$labels.pathScope
+  foreach($item in @(@('IPv4',$dns.Paths.IPv4),@('IPv6',$dns.Paths.IPv6),@($labels.deadProxy,$dns.Paths.DeadProxy))){
+   $state=switch($item[1].state){'denial-observed'{$labels.directDenied};'rejected'{$labels.proxyRejected};'warning'{$labels.pathBypass};default{$labels.inconclusive}}
+   $detail+="`n"+$item[0]+': '+$state
+  }
+  if($dns.Paths.error){$detail+="`n"+$dns.Paths.error}
+ }
+ return $detail
+}
 function Update-PanelDiagnostics($snapshot) {
  $dns=$snapshot.DNS
  $controls.DNSState.Text=$labels.notTested
@@ -54,14 +72,14 @@ function Update-PanelDiagnostics($snapshot) {
  if($snapshot.UDPProtection.ok -and $rtc.state -eq 'inconclusive'){$controls.WebRTCState.Text=$labels.rtcBlocked}
  $risk=$snapshot.IPReputation
  $controls.ReputationState.Text=switch($risk.state){'pending'{$labels.checkActive};'observed'{($labels.reputationObserved -f $risk.score)};'failed'{$labels.probeFailed};default{$labels.noResult}}
- $dnsTone=if($controls.DNSState.Text -eq $labels.probeFailed){'fail'}elseif($dns.System.state -eq 'observed' -and $dns.Proxy.state -eq 'observed'){'pass'}elseif($controls.DNSState.Text -eq $labels.checkActive){'pending'}else{'neutral'}
- $rtcTone=if($rtc.state -in @('warning','failed')){'fail'}elseif(($rtc.state -eq 'observed-match' -or $rtc.state -eq 'inconclusive') -and $snapshot.UDPProtection.ok){'pass'}elseif($rtc.state -eq 'pending'){'pending'}else{'neutral'}
- $riskTone=if($risk.state -eq 'failed'){'fail'}elseif($risk.state -eq 'observed'){'pass'}elseif($risk.state -eq 'pending'){'pending'}else{'neutral'}
+ $dnsTone=if($controls.DNSState.Text -eq $labels.probeFailed){'fail'}elseif($controls.DNSState.Text -eq $labels.checkActive){'pending'}else{'neutral'}
+ $rtcTone=if($rtc.state -in @('warning','failed')){'fail'}elseif($rtc.state -eq 'observed-match' -and $snapshot.UDPProtection.ok){'pass'}elseif($rtc.state -eq 'pending'){'pending'}else{'neutral'}
+ $riskTone=if($risk.state -eq 'failed'){'fail'}elseif($risk.state -eq 'pending'){'pending'}else{'neutral'}
  foreach($row in @(@('DNS',$dnsTone),@('WebRTC',$rtcTone),@('Reputation',$riskTone))){
   $name=$row[0];$tone=$row[1];Set-PanelTone $name $tone
   $controls[$name+'Mark'].Text=switch($tone){'fail'{'!'}'pass'{[string][char]0x2713}'pending'{[string][char]0x25CB}default{[string][char]0x00B7}}
  }
- $controls.DNSState.ToolTip=Get-PanelDiagnosticDetail $dns $labels.dnsScope
+ $controls.DNSState.ToolTip=(Get-PanelDiagnosticDetail $dns $labels.dnsScope)+(Get-PanelNetworkDetail $dns)
  $controls.WebRTCState.ToolTip=(Get-PanelDiagnosticDetail $rtc $labels.webRTCScope)+"`n"+$(if($snapshot.UDPProtection.ok){$labels.udpRuleVerified}else{$labels.udpRuleMissing})
  $controls.ReputationState.ToolTip=Get-PanelDiagnosticDetail $risk $labels.reputationScope
 }
@@ -90,10 +108,10 @@ function Apply-PanelSnapshot($snapshot) {
  Update-PanelDiagnostics $snapshot
  $controls.TimezoneState.Text=if($snapshot.Environment.timezone){$snapshot.Environment.timezone}else{$labels.notTested}
  $controls.LanguageState.Text=if($snapshot.Environment.language){$snapshot.Environment.language.Replace(' (override)','').Replace(' (preference)','').Replace(' (process)','')}else{$labels.notTested}
- $controls.LanguageState.ToolTip=$snapshot.Environment.language
+ $controls.LanguageState.ToolTip=$snapshot.Environment.language+"`n"+$labels.regionalFormat+": "+$snapshot.Environment.regionalFormat
  $controls.LocationState.Text=switch($snapshot.Environment.location){'Allow'{$labels.locationAllowed};'Deny'{$labels.locationDenied};default{$labels.notTested}}
  Set-PanelTone 'Location' $(switch($snapshot.Environment.location){'Allow'{'fail'}'Deny'{'pass'}default{'neutral'}})
- $timezoneTone=if($config.ExpectedCountry -eq 'TW' -and $snapshot.Environment.timezone -match '(Taipei|\u53F0\u5317|\u81FA\u5317)'){'pass'}else{'neutral'}
+ $timezoneTone='neutral'
  Set-PanelTone 'Timezone' $timezoneTone
  $controls.TimezoneState.ToolTip=$labels.timezoneScope
  $controls.LocationState.ToolTip=$labels.locationScope+' / '+$snapshot.Environment.locationService
@@ -104,6 +122,11 @@ function Apply-PanelSnapshot($snapshot) {
   if(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){$controls.StatusText.Text=$labels.blocked;$controls.StageText.Text=if(!$snapshot.Proxy.matchesPin){$labels.monitorEgressFailed}else{$labels.udpRuleMissing};Set-UIPresentation 'blocked';$controls.FooterStatus.Text=$labels.footerBlocked}
  }elseif(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){
   $controls.StatusText.Text=if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.ready}else{$labels.monitorPartial};$controls.StageText.Text=if($snapshot.WebRTC.state -eq 'warning'){$labels.rtcWarningHint}elseif($snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.udpReadyHint}else{$labels.monitorPartialHint};if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){Set-UIPresentation 'ready'}else{Set-ThemeBrush $controls.StatusText Foreground '#E7E9EA';$controls.StatusGlyph.Text='?';Set-ThemeBrush $controls.StatusGlyph Foreground '#D3AE67';Set-ThemeBrush $controls.StatusIconBackground Background '#272D32'}
+ }
+ if($snapshot.DNS.Paths.state -eq 'warning'){
+  Invalidate-PanelLaunch
+  $controls.ClaudeReachState.Text=$labels.networkPathWarning;$controls.ClaudeReachMark.Text='!';Set-PanelTone 'ClaudeReach' 'fail'
+  $controls.StatusText.Text=$labels.blocked;$controls.StageText.Text=$labels.networkPathWarning;Set-UIPresentation 'blocked';$controls.FooterStatus.Text=$labels.footerBlocked
  }
  if($snapshot.Components -and !$snapshot.Components.ok -and (!$script:LastGuardVerifiedTime -or [datetimeoffset]$snapshot.Components.Time -ge $script:LastGuardVerifiedTime)){
   Invalidate-PanelLaunch

@@ -272,7 +272,11 @@ if($UiSmokeTest){
  $sample.Proxy.matchesPin=$false;Apply-PanelSnapshot $sample;Assert-FailTone $controls.ClaudeReachState;Assert-FailTone $controls.StatusText;$checks.Add('New egress failure makes both row and header red')
  $sample.Proxy.matchesPin=$true;$sample.DNS.System.state='failed';Apply-PanelSnapshot $sample;Assert-FailTone $controls.DNSState;$checks.Add('A failed nested DNS probe makes the DNS status red')
  $sample.DNS.System.state='observed';$sample.WebRTC.state='warning';Apply-PanelSnapshot $sample;Assert-FailTone $controls.WebRTCState;$checks.Add('An observed browser bypass is visibly red')
- $sample.WebRTC.state='inconclusive';$sample.UDPProtection.ok=$true;Apply-PanelSnapshot $sample;Assert-PassTone $controls.WebRTCState;$checks.Add('Verified UDP protection and scoped empty probe get a green protection badge')
+ $sample.WebRTC.state='inconclusive';$sample.UDPProtection.ok=$true;Apply-PanelSnapshot $sample;foreach($name in @('WebRTC','DNS','Reputation')){if($controls[$name+'Mark'].Text -eq [string][char]0x2713){throw 'An observation was incorrectly shown as a safety pass.'}};$checks.Add('Empty STUN, DNS counts and third-party score remain neutral')
+ $sample.DNS|Add-Member NoteProperty Paths ([pscustomobject]@{state='warning';IPv4=[pscustomobject]@{state='warning'}})
+ $script:ready=$true;$controls.StartButton.IsEnabled=$true;Apply-PanelSnapshot $sample
+ if($script:ready -or $controls.StartButton.IsEnabled){throw 'Observed protected direct access did not block launch.'};Assert-FailTone $controls.ClaudeReachState;$checks.Add('Owned-probe direct success invalidates launch and appears red')
+ $sample.DNS.Paths.state='observed'
  $sample.UDPProtection.ok=$false;Apply-PanelSnapshot $sample;$tone=$controls.WebRTCState.Foreground.Color;if($tone.G -gt $tone.R -and $tone.G -gt $tone.B){throw 'An empty probe without UDP protection was colored green.'};$checks.Add('Empty probe without verified UDP protection cannot appear green')
  $sample.Environment.location='Allow';Apply-PanelSnapshot $sample;Assert-FailTone $controls.LocationState;$checks.Add('Enabled system location is a red privacy reminder')
  $sample.Environment.location='Deny';Apply-PanelSnapshot $sample;Assert-PassTone $controls.LocationState;$checks.Add('Disabled system location is visibly green')

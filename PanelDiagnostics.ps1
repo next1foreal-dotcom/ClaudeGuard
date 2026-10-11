@@ -65,3 +65,73 @@ function Invoke-PanelWebRTC([string]$ip,[string]$BrowserPath) {
  finally{if($job){$job.Dispose()};if($ownsMutex){$mutex.ReleaseMutex()};if($mutex){$mutex.Dispose()}}
  return $result
 }
+# These observations apply only to the owned curl probe and test endpoint.
+# They never authorize an exit or stand in for the launch firewall audit.
+function Invoke-PanelPathRequest([string]$Executable,[int]$Family,[string]$Proxy) {
+ $arguments=@('--silent','--show-error','--fail',('--ipv'+$Family),'--connect-timeout','2','--max-time','4')
+ if($Proxy){$arguments+=@('--proxy',$Proxy,'--noproxy','localhost,127.0.0.1,::1')}else{$arguments+=@('--noproxy','*')}
+ $arguments+='https://www.cloudflare.com/cdn-cgi/trace'
+ $previous=$ErrorActionPreference
+ try{$ErrorActionPreference='Continue';$raw=& $Executable @arguments 2>&1;$code=$LASTEXITCODE}finally{$ErrorActionPreference=$previous}
+ $valid=$false
+ if($code -eq 0){
+  $text=$raw -join "`n"
+  if($text -match '(?m)^ip=([^\r\n]+)'){
+   $address=$null
+   if([ipaddress]::TryParse($matches[1],[ref]$address)){
+    $expected=if($Family -eq 4){[Net.Sockets.AddressFamily]::InterNetwork}else{[Net.Sockets.AddressFamily]::InterNetworkV6}
+    $valid=$address.AddressFamily -eq $expected
+   }
+  }
+ }
+ [pscustomobject]@{exitCode=$code;reachable=$valid}
+}
+function Get-PanelPathVerdict($Before,$Protected,$After) {
+ if($Protected.reachable -or $Protected.exitCode -eq 0){return 'warning'}
+ if($Before.reachable -and $After.reachable -and $Protected.exitCode -in @(7,28)){return 'denial-observed'}
+ return 'inconclusive'
+}
+function Invoke-PanelNetworkPaths {
+ $result=New-PanelDiagnostic 'Owned curl only; Cloudflare test endpoint; no proxy client is stopped'
+ try {
+  $system=Join-Path $env:SystemRoot 'System32\curl.exe';$probe=Get-GuardProbePath
+  if((Get-FileHash -LiteralPath $system).Hash -ne (Get-FileHash -LiteralPath $probe).Hash){throw 'Diagnostic probe differs from Windows curl.'}
+  foreach($family in @(4,6)){
+   $before=Invoke-PanelPathRequest $system $family ''
+   $protected=Invoke-PanelPathRequest $probe $family ''
+   $after=Invoke-PanelPathRequest $system $family ''
+   $result|Add-Member NoteProperty ('IPv'+$family) ([pscustomobject]@{state=(Get-PanelPathVerdict $before $protected $after);controlBefore=$before;protected=$protected;controlAfter=$after})
+  }
+  # Bind an unused loopback port without listening, preventing another service from taking it.
+  $socket=[Net.Sockets.Socket]::new([Net.Sockets.AddressFamily]::InterNetwork,[Net.Sockets.SocketType]::Stream,[Net.Sockets.ProtocolType]::Tcp)
+  try {
+   $socket.ExclusiveAddressUse=$true;$socket.Bind([Net.IPEndPoint]::new([ipaddress]::Loopback,0))
+   $dead=Invoke-PanelPathRequest $probe 4 ('http://127.0.0.1:'+$socket.LocalEndPoint.Port)
+   $deadState=if($dead.reachable -or $dead.exitCode -eq 0){'warning'}elseif($dead.exitCode -in @(7,28)){'rejected'}else{'inconclusive'}
+   $result|Add-Member NoteProperty DeadProxy ([pscustomobject]@{state=$deadState;exitCode=$dead.exitCode})
+  }finally{$socket.Dispose()}
+  $result.state=if('warning' -in @($result.IPv4.state,$result.IPv6.state,$result.DeadProxy.state)){'warning'}else{'observed'}
+ }catch{$result.state='failed';$result.error=$_.Exception.Message}
+ $result.Time=(Get-Date).ToString('o');return $result
+}
+function Get-PanelBrowserDNS {
+ $result=New-PanelDiagnostic 'Local Chrome/Edge policy registry only; effective policy and live browser DNS remain unverified'
+ $entries=@()
+ foreach($browser in @(@('Edge','Microsoft\Edge'),@('Chrome','Google\Chrome'))){
+  foreach($hive in @('HKLM','HKCU')){
+   $key=$hive+':\SOFTWARE\Policies\'+$browser[1]
+   $entry=[pscustomobject]@{browser=$browser[0];source=$hive;state='not-configured';mode=$null;templateConfigured=$false}
+   try {
+    if(Test-Path -LiteralPath $key -ErrorAction Stop){
+     $policy=Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+     $entry.mode=[string]$policy.DnsOverHttpsMode
+     $entry.templateConfigured=![string]::IsNullOrWhiteSpace([string]$policy.DnsOverHttpsTemplates)
+     if($entry.mode -or $entry.templateConfigured){$entry.state='configured'}
+    }
+   }catch{$entry.state='unreadable'}
+   $entries+=@($entry)
+  }
+ }
+ $result|Add-Member NoteProperty policies $entries
+ $result.state='unverified';return $result
+}
