@@ -29,7 +29,7 @@ function Write-PanelSnapshot($snapshot) {
  [IO.File]::WriteAllText($temp,($snapshot|ConvertTo-Json -Depth 9),[Text.UTF8Encoding]::new($false))
  if(Test-Path -LiteralPath $SnapshotPath){[IO.File]::Replace($temp,$SnapshotPath,[NullString]::Value)}else{[IO.File]::Move($temp,$SnapshotPath)}
 }
-$diagnostics=$null;$diagnosticIP='';$nextDiagnostics=[datetime]::MinValue
+$diagnostics=$null;$diagnosticIP='';$diagnosticContext='';$nextDiagnostics=[datetime]::MinValue
 while($true){
  $components=[pscustomobject]@{ok=$true;error=$null;Time=(Get-Date).ToString('o')}
  try{$config=Get-GuardConfig;if($config.SchemaVersion -ge 3){Assert-GuardInventory $config (Get-GuardInventory $config)}}catch{$components.ok=$false;$components.error=$_.Exception.Message}
@@ -59,25 +59,27 @@ while($true){
  $proxy.matchesPin=($proxy.ok -and $proxy.ip -eq $config.ExpectedIPv4 -and $proxy.country -eq $config.ExpectedCountry)
  if(!$proxy.ok){$proxy.error='Selected-client traces failed or disagreed.'}
  $proxy.Time=(Get-Date).ToString('o')
- $environment=[pscustomobject]@{timezone=$null;timezoneId=$null;language=$null;regionalFormat=(Get-Culture).Name;location=$null;locationService=$null}
+ $environment=[pscustomobject]@{timezone=$null;timezoneId=$null;timezoneIana=(Get-PanelSystemZone);language=$null;regionalFormat=(Get-Culture).Name;location=$null;locationService=$null}
  try{$zone=Get-TimeZone;$environment.timezone=$zone.DisplayName;$environment.timezoneId=$zone.Id}catch{}
  try{$language=Get-WinUILanguageOverride;if($language){$environment.language=$language.Name+' (override)'}else{$environment.language=(Get-WinUserLanguageList|Select-Object -First 1).LanguageTag+' (preference)'}}catch{$environment.language=[Globalization.CultureInfo]::CurrentUICulture.Name+' (process)'}
  try{$environment.location=(Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' -Name Value -ErrorAction Stop).Value}catch{}
  try{$environment.locationService=(Get-Service lfsvc -ErrorAction Stop).Status.ToString()}catch{}
- if(!$diagnostics -or $diagnosticIP -ne $proxy.ip -or (Get-Date) -ge $nextDiagnostics){
-  $diagnostics=[pscustomobject]@{DNS=[pscustomobject]@{System=(New-PanelDiagnostic 'Windows system DNS');Proxy=(New-PanelDiagnostic 'HTTP proxy probe-domain DNS');Browser=(New-PanelDiagnostic 'Browser policy');Paths=(New-PanelDiagnostic 'Owned probe paths')};WebRTC=(New-PanelDiagnostic 'isolated Edge');IPReputation=(New-PanelDiagnostic 'NetCoffee third-party network cache')}
+ $context=[string]$config.Proxy+'|'+[string]$environment.timezoneId
+ if(!$diagnostics -or $diagnosticIP -ne $proxy.ip -or $diagnosticContext -ne $context -or (Get-Date) -ge $nextDiagnostics){
+  $diagnostics=[pscustomobject]@{DNS=[pscustomobject]@{System=(New-PanelDiagnostic 'Windows system DNS');Proxy=(New-PanelDiagnostic 'HTTP proxy probe-domain DNS');Browser=(New-PanelDiagnostic 'Browser policy');Paths=(New-PanelDiagnostic 'Owned probe paths')};WebRTC=(New-PanelDiagnostic 'isolated Edge');IPReputation=(New-PanelDiagnostic 'NetCoffee third-party network cache');ExitMetadata=(New-PanelDiagnostic 'Protected exit metadata')}
   $refreshDiagnostics=$true
  }else{$refreshDiagnostics=$false}
- $snapshot=[pscustomobject]@{Time=(Get-Date).ToString('o');WorkerPid=$PID;Components=$components;Direct=$direct;Proxy=$proxy;Environment=$environment;DNS=$diagnostics.DNS;WebRTC=$diagnostics.WebRTC;IPReputation=$diagnostics.IPReputation;RefreshSeconds=30;DiagnosticRefreshSeconds=600;UDPProtection=(Get-BrowserUDPStatus)}
+ $snapshot=[pscustomobject]@{Time=(Get-Date).ToString('o');WorkerPid=$PID;Components=$components;Direct=$direct;Proxy=$proxy;Environment=$environment;DNS=$diagnostics.DNS;WebRTC=$diagnostics.WebRTC;IPReputation=$diagnostics.IPReputation;ExitMetadata=$diagnostics.ExitMetadata;RefreshSeconds=30;DiagnosticRefreshSeconds=600;UDPProtection=(Get-BrowserUDPStatus)}
  Write-PanelSnapshot $snapshot
  if($refreshDiagnostics){
+  $diagnostics.ExitMetadata=Invoke-PanelExitMetadata $proxy.ip;$snapshot.ExitMetadata=$diagnostics.ExitMetadata;Write-PanelSnapshot $snapshot
   $diagnostics.DNS.System=Invoke-PanelDNS $true;Write-PanelSnapshot $snapshot
   $diagnostics.DNS.Proxy=Invoke-PanelDNS $false;Write-PanelSnapshot $snapshot
   $diagnostics.DNS.Browser=Get-PanelBrowserDNS;Write-PanelSnapshot $snapshot
   $diagnostics.DNS.Paths=Invoke-PanelNetworkPaths;Write-PanelSnapshot $snapshot
   $diagnostics.IPReputation=Invoke-PanelReputation $proxy.ip;$snapshot.IPReputation=$diagnostics.IPReputation;Write-PanelSnapshot $snapshot
   $diagnostics.WebRTC=Invoke-PanelWebRTC $proxy.ip;$snapshot.WebRTC=$diagnostics.WebRTC;Write-PanelSnapshot $snapshot
-  $diagnosticIP=$proxy.ip;$nextDiagnostics=(Get-Date).AddSeconds(600)
+  $diagnosticIP=$proxy.ip;$diagnosticContext=$context;$nextDiagnostics=(Get-Date).AddSeconds(600)
  }
  if($Once){$snapshot|Select-Object Time,WorkerPid,@{n='DirectAvailable';e={$_.Direct.ok}},@{n='ProxyAvailable';e={$_.Proxy.ok}},@{n='ProxyMatchesPin';e={$_.Proxy.matchesPin}}|ConvertTo-Json -Compress;break}
  $next=(Get-Date).AddSeconds(30)

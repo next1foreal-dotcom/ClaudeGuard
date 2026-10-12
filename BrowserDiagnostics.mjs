@@ -2,7 +2,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
-const [profile, expected] = process.argv.slice(2);
+const [profile, expected, mode] = process.argv.slice(2);
+if (profile === '--system-environment') {
+  // Read the OS default, not a caller's optional TZ override.
+  delete process.env.TZ;
+  console.log(JSON.stringify({timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,utcOffsetMinutes:-new Date().getTimezoneOffset()}));
+  process.exit(0);
+}
+let browserEnvironment=null;
 const deadline = setTimeout(() => { console.log(JSON.stringify({state:'failed',error:'Browser diagnostic timeout.'})); process.exit(1); }, 20000);
 let socket;
 function publicAddress(value) {
@@ -34,6 +41,12 @@ try {
   }
   const target=await command('Target.createTarget',{url:'about:blank'});
   const attached=await command('Target.attachToTarget',{targetId:target.targetId,flatten:true});
+  const envProbe=await command('Runtime.evaluate',{returnByValue:true,expression:`({timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,utcOffsetMinutes:-new Date().getTimezoneOffset(),language:navigator.language})`},attached.sessionId);
+  if(!envProbe.exceptionDetails)browserEnvironment=envProbe.result?.value??null;
+  if(mode==='--environment-only'){
+    console.log(JSON.stringify({state:'inconclusive',environment:browserEnvironment,scope:'isolated-browser-environment-only'}));
+    clearTimeout(deadline);socket.close();process.exit(0);
+  }
   const probe=await command('Runtime.evaluate',{awaitPromise:true,returnByValue:true,expression:`(async()=>{
     const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun.cloudflare.com:3478'}]});
     const candidates=[];
@@ -63,6 +76,6 @@ try {
   })()`},attached.sessionId);
   const HTTPTests=httpProbe.result?.value||[];
   const different=publicIPs.filter(ip=>ip!==expected);
-  console.log(JSON.stringify({state:publicIPs.length?(different.length?'warning':'observed-match'):'inconclusive',publicIPs,observedCount:candidates.length,scope:'isolated-browser-explicit-http-proxy',differentCount:different.length,HTTPTests}));
-} catch(error) { console.log(JSON.stringify({state:'failed',error:error.message,scope:'isolated-browser-explicit-http-proxy'})); process.exitCode=1; }
+  console.log(JSON.stringify({state:publicIPs.length?(different.length?'warning':'observed-match'):'inconclusive',publicIPs,observedCount:candidates.length,scope:'isolated-browser-explicit-http-proxy',differentCount:different.length,HTTPTests,environment:browserEnvironment}));
+} catch(error) { console.log(JSON.stringify({state:'failed',error:error.message,environment:browserEnvironment,scope:'isolated-browser-explicit-http-proxy'})); process.exitCode=1; }
 finally {clearTimeout(deadline);if(socket)socket.close();}

@@ -43,7 +43,7 @@ function Invoke-PanelReputation([string]$ip) {
  }catch{Set-PanelDiagnosticFailure $result $_.Exception}
  $result.Time=(Get-Date).ToString('o');return $result
 }
-function Invoke-PanelWebRTC([string]$ip,[string]$BrowserPath) {
+function Invoke-PanelWebRTC([string]$ip,[string]$BrowserPath,[switch]$EnvironmentOnly) {
  $scope='Isolated Edge with explicit HTTP proxy; not the daily browser'
  $result=New-PanelDiagnostic $scope
  $job=$null;$mutex=$null;$ownsMutex=$false
@@ -62,10 +62,14 @@ function Invoke-PanelWebRTC([string]$ip,[string]$BrowserPath) {
   Import-GuardJob
   $arguments=@('--headless=new','--remote-debugging-port=0','--remote-debugging-address=127.0.0.1',('--user-data-dir='+$profile),('--proxy-server='+[string]$config.Proxy),'--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update','--disable-extensions','--disable-sync','--disable-gpu','--disable-quic','about:blank')
   $job=[ClaudeGuardJob]::new($edge,[string[]]$arguments,$PSScriptRoot,$false)
-  $raw=& $node (Join-Path $PSScriptRoot 'BrowserDiagnostics.mjs') $profile $ip
+  $zoneBefore=(Get-TimeZone).Id
+  $probeArgs=@((Join-Path $PSScriptRoot 'BrowserDiagnostics.mjs'),$profile,$ip)
+  if($EnvironmentOnly){$probeArgs+='--environment-only'}
+  $raw=& $node @probeArgs
   $result=($raw -join "`n")|ConvertFrom-Json
   $result|Add-Member NoteProperty Time (Get-Date).ToString('o')
   $result|Add-Member NoteProperty Browser ([IO.Path]::GetFileName($edge))
+  if($result.environment -and $zoneBefore -eq (Get-TimeZone).Id){$result.environment|Add-Member NoteProperty systemTimezoneId $zoneBefore}
  }catch{$result=New-PanelDiagnostic $scope;$result.state='failed';$result.error=$_.Exception.Message}
  finally{if($job){$job.Dispose()};if($ownsMutex){$mutex.ReleaseMutex()};if($mutex){$mutex.Dispose()}}
  return $result
@@ -139,4 +143,46 @@ function Get-PanelBrowserDNS {
  }
  $result|Add-Member NoteProperty policies $entries
  $result.state='unverified';return $result
+}
+function Invoke-PanelExitMetadata([string]$ip) {
+ $result=New-PanelDiagnostic 'IP geolocation estimate through the configured HTTP proxy'
+ foreach($entry in @{ip=$ip;timezone=$null;city=$null;country=$null;source=$null;attempts=@()}.GetEnumerator()){$result|Add-Member NoteProperty $entry.Key $entry.Value}
+ if(!$ip){$result.state='unverified';return $result}
+ $invalid=$false
+ foreach($service in @('https://ipinfo.io/json','https://ipwho.is/','https://ipapi.co/json/')){
+  $source=([uri]$service).Host;$received=$false
+  try {
+   $response=Invoke-PanelCurl $service $false;$received=$true
+   if($response.Text.Length -gt 32768){throw 'Metadata response is too large.'}
+   $data=$response.Text|ConvertFrom-Json
+   if($data.success -eq $false -or $data.error){throw 'Metadata service returned an error.'}
+   if(!$data.ip -or ([ipaddress]$data.ip).ToString() -ne ([ipaddress]$ip).ToString()){throw 'Metadata IP differs from the protected exit.'}
+   $zone=if($data.timezone -is [string]){$data.timezone}else{$data.timezone.id}
+   if(!$zone -or $zone.Length -gt 100 -or $zone -notmatch '^(?:[A-Za-z_+-]+/){1,2}[A-Za-z0-9_+-]+$'){throw 'Metadata timezone is missing or invalid.'}
+   $country=if($data.country_code){$data.country_code}else{$data.country}
+   if($country -notmatch '^[A-Z]{2}$'){throw 'Metadata country is invalid.'}
+   $result.timezone=[string]$zone;$result.city=[string]$data.city;$result.country=[string]$country;$result.source=$source;$result.state='observed'
+   $result.attempts+=@([pscustomobject]@{source=$source;state='observed'})
+   $result.Time=(Get-Date).ToString('o');return $result
+  }catch{
+   if($received){$invalid=$true}
+   $result.attempts+=@([pscustomobject]@{source=$source;state=$(if($received){'invalid'}else{'unavailable'});error=$_.Exception.Message})
+  }
+ }
+ $result.state=if($invalid){'failed'}else{'unavailable'}
+ $result.error='No matching exit metadata could be verified.';$result.Time=(Get-Date).ToString('o');return $result
+}
+function Get-PanelSystemZone {
+ [TimeZoneInfo]::ClearCachedData()
+ try {
+  $node=Join-Path $env:ProgramFiles 'nodejs\node.exe'
+  if(!(Test-Path -LiteralPath $node)){return $null}
+  $raw=& $node (Join-Path $PSScriptRoot 'BrowserDiagnostics.mjs') --system-environment
+  if($LASTEXITCODE -ne 0){return $null}
+  $value=($raw -join "`n")|ConvertFrom-Json
+  # Offset is a consistency check only, never sufficient for timezone equality.
+  $zone=Get-TimeZone
+  if($value.utcOffsetMinutes -ne $zone.GetUtcOffset([datetime]::Now).TotalMinutes){return $null}
+  return [string]$value.timezone
+ }catch{return $null}
 }

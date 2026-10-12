@@ -44,4 +44,32 @@ Assert-Case ($controls.DNSState.ToolTip.Contains('curl 35')) 'DNS detail preserv
 function Invoke-PanelCurl { [pscustomobject]@{Text='{}'} }
 $malformed=Invoke-PanelReputation '192.0.2.1'
 Assert-Case ($malformed.state -eq 'failed') 'Invalid service data remains a failed diagnostic'
+$script:metaCalls=@()
+function Invoke-PanelCurl([string]$url,[bool]$direct){
+ $script:metaCalls+=@([pscustomobject]@{url=$url;direct=$direct})
+ if($url -like '*ipinfo*'){ $e=[Exception]::new('Probe failed (curl 35).');$e.Data['CurlExitCode']=35;throw $e }
+ [pscustomobject]@{Text='{"success":true,"ip":"192.0.2.1","country_code":"US","timezone":{"id":"America/Los_Angeles"},"city":"Los Angeles"}'}
+}
+$meta=Invoke-PanelExitMetadata '192.0.2.1'
+Assert-Case ($meta.state -eq 'observed' -and $meta.timezone -eq 'America/Los_Angeles' -and $meta.source -eq 'ipwho.is') 'Exit metadata falls back after a TLS failure'
+Assert-Case ($metaCalls.Count -eq 2 -and @($metaCalls|Where-Object direct).Count -eq 0) 'Every metadata service uses the proxy route'
+function Invoke-PanelCurl { [pscustomobject]@{Text='{"ip":"192.0.2.99","country":"US","country_code":"US","timezone":"America/Los_Angeles"}'} }
+$meta=Invoke-PanelExitMetadata '192.0.2.1'
+Assert-Case ($meta.state -ne 'observed' -and !$meta.timezone) 'Metadata from another exit cannot be reused'
+function Invoke-PanelCurl { throw 'Unavailable' }
+$meta=Invoke-PanelExitMetadata '192.0.2.1'
+Assert-Case ($meta.state -eq 'unavailable' -and $meta.attempts.Count -eq 3) 'All unavailable services remain unverified'
+$now=(Get-Date).ToString('o')
+$fixture=[pscustomobject]@{Proxy=[pscustomobject]@{ip='192.0.2.1';matchesPin=$true};Environment=[pscustomobject]@{timezoneIana='America/Los_Angeles';timezoneId='Pacific Standard Time'};ExitMetadata=[pscustomobject]@{state='observed';ip='192.0.2.1';timezone='America/Los_Angeles';Time=$now};WebRTC=[pscustomobject]@{Time=$now;environment=[pscustomobject]@{timezone='America/Los_Angeles';systemTimezoneId='Pacific Standard Time'}}}
+Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'match') 'All three measured timezone identities match'
+$fixture.Environment.timezoneIana='America/Phoenix'
+Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'mismatch') 'Arizona is not Los Angeles even at the same UTC offset'
+$fixture.Environment.timezoneIana='America/Los_Angeles';$fixture.WebRTC.environment.timezone=$null
+Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'unverified') 'Missing browser measurement never passes'
+$fixture.WebRTC.environment.timezone='America/Los_Angeles';$fixture.WebRTC.Time=(Get-Date).AddMinutes(-12).ToString('o')
+Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'unverified') 'Expired browser readings never pass'
+$fixture.WebRTC.Time=$now;$fixture.ExitMetadata.ip='192.0.2.99'
+Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'unverified') 'Old exit metadata never passes for a new exit'
+$fixture.ExitMetadata.ip='192.0.2.1';$fixture.WebRTC.environment.systemTimezoneId='US Mountain Standard Time'
+Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'unverified') 'Browser reading from before a system timezone change cannot pass'
 Write-Output ('Diagnostic tests passed: '+$count)

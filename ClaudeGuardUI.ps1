@@ -17,7 +17,7 @@ $reader=New-Object Xml.XmlNodeReader $xml
 $window=[Windows.Markup.XamlReader]::Load($reader)
 $appIcon=Join-Path $root 'assets\ClaudeGuard.ico';if(Test-Path -LiteralPath $appIcon){$window.Icon=[Windows.Media.Imaging.BitmapFrame]::Create([Uri]$appIcon)}
 $controls=@{}
-foreach($name in 'StatusText','StageText','Progress','IpText','CoverageText','ChecksText','LastChecked','Details','HideIP','ClientChoice','InstallButton','CheckButton','StartButton','WindowTopmost','CloseButton','StatusGlyph','StatusIconBackground','FooterStatus','FooterDot','CountryText','ComponentState','ComponentMark','FirewallState','FirewallMark','RoutingState','RoutingMark','EgressState','EgressMark','DirectIpText','DirectCountryText','ProxyLatencyText','ClaudeReachState','ClaudeReachMark','DNSState','DNSMark','WebRTCState','WebRTCMark','ReputationState','ReputationMark','TimezoneState','LanguageState','LocationState'){$controls[$name]=$window.FindName($name)}
+foreach($name in 'StatusText','StageText','Progress','IpText','CoverageText','ChecksText','LastChecked','Details','HideIP','ClientChoice','InstallButton','CheckButton','StartButton','WindowTopmost','CloseButton','StatusGlyph','StatusIconBackground','FooterStatus','FooterDot','CountryText','ComponentState','ComponentMark','FirewallState','FirewallMark','RoutingState','RoutingMark','EgressState','EgressMark','DirectIpText','DirectCountryText','ProxyLatencyText','ClaudeReachState','ClaudeReachMark','DNSState','DNSMark','WebRTCState','WebRTCMark','ReputationState','ReputationMark','TimezoneState','BrowserTimezoneState','ExitTimezoneState','LanguageState','LocationState'){$controls[$name]=$window.FindName($name)}
 $script:ClientTabs=@();$script:LastGuardVerifiedTime=$null;$script:backend=$null;$script:mode='';$script:statePath=$null;$script:stopPath=$null;$script:seenTime='';$script:ready=$false;$script:lastPhase='unknown';$script:UIBusy=$false;$script:StopRequested=$false
 . (Join-Path $root 'GuardTheme.ps1')
 Restore-PanelTheme
@@ -284,6 +284,25 @@ if($UiSmokeTest){
  if($controls.StatusText.Text -ne $labels.ready -or !$script:ready -or !$controls.StartButton.IsEnabled){throw 'Optional service outage hid successful startup verification.'};Assert-PassTone $controls.StatusText;$checks.Add('Optional test-service outage does not contradict verified startup protection')
  if($controls.DNSState.Text -ne $labels.serviceUnavailable -or $controls.DNSMark.Text -eq '!'){throw 'Optional service outage was presented as protection failure.'};$checks.Add('TLS test-service outages have a distinct neutral label')
  $config.RequireBrowserUDP=$savedUDPRequirement;$sample.DNS.System.state='observed';$sample.DNS.Proxy.state='observed';$sample.IPReputation.state='observed';$script:ready=$false
+ $tzNow=[datetimeoffset]::Now.ToString('o')
+ $sample.Environment|Add-Member NoteProperty timezoneIana 'America/Los_Angeles' -Force
+ $sample.Environment|Add-Member NoteProperty timezoneId 'Pacific Standard Time' -Force
+ $sample|Add-Member NoteProperty ExitMetadata ([pscustomobject]@{state='observed';ip=$sample.Proxy.ip;timezone='America/Los_Angeles';source='fixture';Time=$tzNow}) -Force
+ $sample.WebRTC|Add-Member NoteProperty environment ([pscustomobject]@{timezone='America/Los_Angeles';systemTimezoneId='Pacific Standard Time'}) -Force
+ $sample.WebRTC|Add-Member NoteProperty Time $tzNow -Force
+ $sample.Proxy.matchesPin=$true
+ foreach($theme in @('Light','Dark')){
+  Set-PanelTheme $theme;Update-PanelTimezones $sample
+  foreach($field in @('TimezoneState','BrowserTimezoneState','ExitTimezoneState')){Assert-PassTone $controls[$field];if($controls[$field].Text -ne 'America/Los_Angeles'){throw 'Missing measured timezone row'}}
+  $sample.ExitMetadata.timezone='America/Phoenix';Update-PanelTimezones $sample;Assert-FailTone $controls.ExitTimezoneState
+  $sample.ExitMetadata.state='unavailable';Update-PanelTimezones $sample
+  if($controls.ExitTimezoneState.Text -ne $labels.serviceUnavailable -or $controls.TimezoneState.ToolTip -notlike ($labels.timezoneUnverified+'*')){throw 'Unavailable metadata retained a matching verdict'}
+  $sample.ExitMetadata.state='observed';$sample.ExitMetadata.timezone='America/Los_Angeles'
+ }
+ $checks.Add('Measured timezone rows display match mismatch and unavailable in both themes')
+ $sample.WebRTC.Time=[datetimeoffset]::Now.AddMinutes(-12).ToString('o');Update-PanelTimezones $sample
+ if($controls.TimezoneState.ToolTip -notlike ($labels.timezoneUnverified+'*')){throw 'Expired timezone observations passed'}
+ $checks.Add('Expired environment readings cannot retain a green timezone comparison')
  $sample.Environment.location='Allow';Apply-PanelSnapshot $sample;Assert-FailTone $controls.LocationState;$checks.Add('Enabled system location is a red privacy reminder')
  $sample.Environment.location='Deny';Apply-PanelSnapshot $sample;Assert-PassTone $controls.LocationState;$checks.Add('Disabled system location is visibly green')
  $sample.IPReputation.state='failed';Apply-PanelSnapshot $sample;Assert-FailTone $controls.ReputationState;$checks.Add('Failed third-party lookup is visibly red')

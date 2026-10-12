@@ -85,6 +85,30 @@ function Update-PanelDiagnostics($snapshot) {
  $controls.WebRTCState.ToolTip=(Get-PanelDiagnosticDetail $rtc $labels.webRTCScope)+"`n"+$(if($snapshot.UDPProtection.ok){$labels.udpRuleVerified}else{$labels.udpRuleMissing})
  $controls.ReputationState.ToolTip=Get-PanelDiagnosticDetail $risk $labels.reputationScope
 }
+function Get-PanelTimezoneVerdict($snapshot) {
+ $system=$snapshot.Environment;$browser=$snapshot.WebRTC;$exit=$snapshot.ExitMetadata
+ if(!$snapshot.Proxy.matchesPin -or $exit.state -ne 'observed' -or $exit.ip -ne $snapshot.Proxy.ip){return 'unverified'}
+ if(!$system.timezoneIana -or !$browser.environment.timezone -or !$exit.timezone -or $browser.environment.systemTimezoneId -ne $system.timezoneId){return 'unverified'}
+ foreach($item in @($browser,$exit)){
+  try{$age=([datetimeoffset]::Now-[datetimeoffset]$item.Time).TotalSeconds;if(!$item.Time -or $age -lt -30 -or $age -gt 660){return 'unverified'}}catch{return 'unverified'}
+ }
+ if($system.timezoneIana -ceq $browser.environment.timezone -and $system.timezoneIana -ceq $exit.timezone){return 'match'}
+ return 'mismatch'
+}
+function Update-PanelTimezones($snapshot) {
+ $verdict=Get-PanelTimezoneVerdict $snapshot
+ $controls.TimezoneState.Text=if($snapshot.Environment.timezoneIana){$snapshot.Environment.timezoneIana}elseif($snapshot.Environment.timezone){$snapshot.Environment.timezone}else{$labels.notTested}
+ $browserZone=$snapshot.WebRTC.environment.timezone
+ $metadata=$snapshot.ExitMetadata
+ $controls.BrowserTimezoneState.Text=if($browserZone){$browserZone}else{$labels.notTested}
+ $controls.ExitTimezoneState.Text=if($metadata.state -eq 'observed' -and $metadata.ip -eq $snapshot.Proxy.ip){$metadata.timezone}elseif($metadata.state -eq 'pending'){$labels.checkActive}elseif($metadata.state -eq 'unavailable'){$labels.serviceUnavailable}else{$labels.notTested}
+ $tone=switch($verdict){'match'{'pass'}'mismatch'{'fail'}default{'neutral'}}
+ $summary=switch($verdict){'match'{$labels.timezoneMatch}'mismatch'{$labels.timezoneMismatch}default{$labels.timezoneUnverified}}
+ foreach($name in @('Timezone','BrowserTimezone','ExitTimezone')){Set-PanelTone $name $tone}
+ $controls.TimezoneState.ToolTip=$summary+"`n"+$snapshot.Environment.timezone+"`n"+$labels.timezoneScope
+ $controls.BrowserTimezoneState.ToolTip=$summary+"`n"+$labels.browserTimezoneScope+$(if($snapshot.WebRTC.Time){"`n"+$labels.updated+([datetimeoffset]$snapshot.WebRTC.Time).ToLocalTime().ToString('HH:mm:ss')})
+ $controls.ExitTimezoneState.ToolTip=$summary+"`n"+(Get-PanelDiagnosticDetail $metadata $labels.exitTimezoneScope)+$(if($metadata.source){"`n"+$metadata.source})
+}
 function Apply-PanelSnapshot($snapshot) {
  $script:PanelSnapshot=$snapshot
  $egressTime=if($snapshot.Proxy.Time){[datetimeoffset]$snapshot.Proxy.Time}else{[datetimeoffset]$snapshot.Time}
@@ -108,14 +132,11 @@ function Apply-PanelSnapshot($snapshot) {
  }
  Set-PanelTone 'ClaudeReach' $(if($olderEgress -and !$snapshot.Proxy.matchesPin){'neutral'}elseif($snapshot.Proxy.matchesPin){'pass'}else{'fail'})
  Update-PanelDiagnostics $snapshot
- $controls.TimezoneState.Text=if($snapshot.Environment.timezone){$snapshot.Environment.timezone}else{$labels.notTested}
+ Update-PanelTimezones $snapshot
  $controls.LanguageState.Text=if($snapshot.Environment.language){$snapshot.Environment.language.Replace(' (override)','').Replace(' (preference)','').Replace(' (process)','')}else{$labels.notTested}
  $controls.LanguageState.ToolTip=$snapshot.Environment.language+"`n"+$labels.regionalFormat+": "+$snapshot.Environment.regionalFormat
  $controls.LocationState.Text=switch($snapshot.Environment.location){'Allow'{$labels.locationAllowed};'Deny'{$labels.locationDenied};default{$labels.notTested}}
  Set-PanelTone 'Location' $(switch($snapshot.Environment.location){'Allow'{'fail'}'Deny'{'pass'}default{'neutral'}})
- $timezoneTone='neutral'
- Set-PanelTone 'Timezone' $timezoneTone
- $controls.TimezoneState.ToolTip=$labels.timezoneScope
  $controls.LocationState.ToolTip=$labels.locationScope+' / '+$snapshot.Environment.locationService
  $displayTime=if($olderThanGuard){$script:LastGuardVerifiedTime}else{[datetimeoffset]$snapshot.Time}
  $controls.LastChecked.Text=$labels.updated+$displayTime.ToLocalTime().ToString('HH:mm:ss')
@@ -156,5 +177,7 @@ function Poll-PanelWorker {
   Set-PanelTone 'ClaudeReach' 'fail';$controls.ClaudeReachMark.Foreground=$controls.ClaudeReachState.Foreground
   $controls.IpText.Text=[string][char]0x2014;$controls.ProxyLatencyText.Text='';$controls.CountryText.Text=$labels.monitorStale
   Invalidate-PanelLaunch
+  foreach($name in @('Timezone','BrowserTimezone','ExitTimezone')){Set-PanelTone $name 'neutral'}
+  $controls.TimezoneState.ToolTip=$labels.monitorStale
  }
 }

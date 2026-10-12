@@ -100,5 +100,10 @@
   "dohTemplateConfigured": "已设 DoH 端点",
   "regionalFormat": "区域格式",
   "serviceUnavailable": "检测服务不可用",
+  "timezoneMatch": "三方时区一致",
+  "timezoneMismatch": "时区标识不一致",
+  "timezoneUnverified": "时区对照未核验",
+  "browserTimezoneScope": "仅为隔离 Edge 的实际读数，不代表日常浏览器或 Claude 客户端。",
+  "exitTimezoneScope": "通过配置的 HTTP 代理查询；IP 归属地时区为服务估计，不代表物理位置。",
   "diagnosticsSeparate": "附加诊断见下方"
 }
