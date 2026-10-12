@@ -14,7 +14,7 @@ function Invoke-PanelCurl([string]$url,[bool]$direct){
  $arguments+=@($url)
  $watch=[Diagnostics.Stopwatch]::StartNew();$previous=$ErrorActionPreference
  try{$ErrorActionPreference='Continue';$raw=& $exe @arguments 2>&1;$exitCode=$LASTEXITCODE}finally{$ErrorActionPreference=$previous;$watch.Stop()}
- if($exitCode -ne 0){throw ('Probe failed (curl '+$exitCode+').')}
+ if($exitCode -ne 0){$failure=[Exception]::new(('Probe failed (curl '+$exitCode+').'));$failure.Data['CurlExitCode']=$exitCode;throw $failure}
  return [pscustomobject]@{Text=($raw -join "`n");Milliseconds=[int]$watch.ElapsedMilliseconds}
 }
 function Read-Trace([string]$text){

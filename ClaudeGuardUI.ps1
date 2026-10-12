@@ -278,6 +278,12 @@ if($UiSmokeTest){
  if($script:ready -or $controls.StartButton.IsEnabled){throw 'Observed protected direct access did not block launch.'};Assert-FailTone $controls.ClaudeReachState;$checks.Add('Owned-probe direct success invalidates launch and appears red')
  $sample.DNS.Paths.state='observed'
  $sample.UDPProtection.ok=$false;Apply-PanelSnapshot $sample;$tone=$controls.WebRTCState.Foreground.Color;if($tone.G -gt $tone.R -and $tone.G -gt $tone.B){throw 'An empty probe without UDP protection was colored green.'};$checks.Add('Empty probe without verified UDP protection cannot appear green')
+ $savedUDPRequirement=$config.RequireBrowserUDP;$config.RequireBrowserUDP=$false
+ $script:ready=$true;$controls.StartButton.IsEnabled=$true;$sample.Proxy.matchesPin=$true;$sample.DNS.System.state='unavailable';$sample.DNS.Proxy.state='unavailable';$sample.IPReputation.state='unavailable'
+ Apply-PanelSnapshot $sample
+ if($controls.StatusText.Text -ne $labels.ready -or !$script:ready -or !$controls.StartButton.IsEnabled){throw 'Optional service outage hid successful startup verification.'};Assert-PassTone $controls.StatusText;$checks.Add('Optional test-service outage does not contradict verified startup protection')
+ if($controls.DNSState.Text -ne $labels.serviceUnavailable -or $controls.DNSMark.Text -eq '!'){throw 'Optional service outage was presented as protection failure.'};$checks.Add('TLS test-service outages have a distinct neutral label')
+ $config.RequireBrowserUDP=$savedUDPRequirement;$sample.DNS.System.state='observed';$sample.DNS.Proxy.state='observed';$sample.IPReputation.state='observed';$script:ready=$false
  $sample.Environment.location='Allow';Apply-PanelSnapshot $sample;Assert-FailTone $controls.LocationState;$checks.Add('Enabled system location is a red privacy reminder')
  $sample.Environment.location='Deny';Apply-PanelSnapshot $sample;Assert-PassTone $controls.LocationState;$checks.Add('Disabled system location is visibly green')
  $sample.IPReputation.state='failed';Apply-PanelSnapshot $sample;Assert-FailTone $controls.ReputationState;$checks.Add('Failed third-party lookup is visibly red')
@@ -319,7 +325,7 @@ if($UiSmokeTest){
  $previousPhase=$script:lastPhase;$previousReady=$script:ready;$previousStart=$controls.StartButton.IsEnabled;$previousText=$controls.LocationState.Text
  $themeButton=$window.FindName('ThemeButton')
  $themeButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
- if($script:PanelTheme -ne 'Light' -or $window.FindName('PanelSurface').Background.Color.A -ne 216){throw 'Frosted light theme did not replace the panel surface'}
+ if($script:PanelTheme -ne 'Light' -or $window.FindName('PanelSurface').Background.Color.A -ne 255){throw 'Frosted light theme did not replace the panel surface'}
  Assert-PassTone $controls.LocationState;Assert-FailTone $controls.StatusText
  if($controls.LocationState.Foreground.Color.R -ne 8 -or $controls.StatusText.Foreground.Color.R -ne 131){throw 'Live status colors did not follow the light theme'}
  if($script:lastPhase -ne $previousPhase -or $script:ready -ne $previousReady -or $controls.StartButton.IsEnabled -ne $previousStart -or $controls.LocationState.Text -ne $previousText){throw 'Theme switch modified monitoring or launch state'}

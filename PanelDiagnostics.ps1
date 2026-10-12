@@ -1,3 +1,8 @@
+function Set-PanelDiagnosticFailure($result,$exception) {
+ # Transport/HTTP failures describe test-service availability, never a leak verdict.
+ $result.state=if($exception.Data.Contains('CurlExitCode')){'unavailable'}else{'failed'}
+ $result.error=$exception.Message
+}
 function New-PanelDiagnostic([string]$scope) {return [pscustomobject]@{state='pending';scope=$scope;Time=(Get-Date).ToString('o');error=$null}}
 function Invoke-PanelDNS([bool]$direct) {
  $scope=if($direct){'Windows system DNS'}else{'HTTP proxy probe-domain DNS'}
@@ -14,7 +19,7 @@ function Invoke-PanelDNS([bool]$direct) {
   $servers=@($data.dns_servers | Where-Object {$_ -and [ipaddress]::TryParse([string]$_,[ref]([ipaddress]::None))})
   $result|Add-Member NoteProperty resolvers $servers
   $result.state=if($servers.Count){'observed'}else{'inconclusive'}
- }catch{$result.state='failed';$result.error=$_.Exception.Message}
+ }catch{Set-PanelDiagnosticFailure $result $_.Exception}
  $result.Time=(Get-Date).ToString('o');return $result
 }
 function Invoke-PanelReputation([string]$ip) {
@@ -35,7 +40,7 @@ function Invoke-PanelReputation([string]$ip) {
   $result|Add-Member NoteProperty responseIP ([string]$data.ip)
   $result|Add-Member NoteProperty category ([string]$data.asn_kind)
   $result.state='observed'
- }catch{$result.state='failed';$result.error=$_.Exception.Message}
+ }catch{Set-PanelDiagnosticFailure $result $_.Exception}
  $result.Time=(Get-Date).ToString('o');return $result
 }
 function Invoke-PanelWebRTC([string]$ip,[string]$BrowserPath) {

@@ -35,6 +35,7 @@ function Get-PanelDiagnosticDetail($value,[string]$scope) {
  if($value.System){$detail+="`n"+($labels.dnsSystemDetail -f (@($value.System.resolvers) -join ', '))+"`n"+($labels.dnsProxyDetail -f (@($value.Proxy.resolvers) -join ', '))}
  elseif($value.publicIPs){$detail+="`n"+($labels.rtcAddressesDetail -f (@($value.publicIPs) -join ', '))}
  elseif($value.cidr){$detail+="`n"+($labels.reputationNetworkDetail -f $value.cidr)+"`n"+($labels.reputationKindDetail -f $value.category)}
+ foreach($entry in @($value.System,$value.Proxy)){if($entry.error){$detail+="`n"+$entry.scope+': '+$entry.error}}
  if($value.Time){$detail+="`n"+$labels.updated+([datetimeoffset]$value.Time).ToLocalTime().ToString('HH:mm:ss')}
  if($value.error){$detail+="`n"+$labels.diagnosticErrorDetail+$value.error}
  if($controls.HideIP.IsChecked){$detail=[regex]::Replace($detail,'\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b','$1.*.*')}
@@ -65,13 +66,14 @@ function Update-PanelDiagnostics($snapshot) {
   if($dns.System.state -eq 'pending' -or $dns.Proxy.state -eq 'pending'){$controls.DNSState.Text=$labels.checkActive}
   elseif($dns.System.state -eq 'observed' -and $dns.Proxy.state -eq 'observed'){$controls.DNSState.Text=($labels.dnsObserved -f @($dns.System.resolvers).Count,@($dns.Proxy.resolvers).Count)}
   elseif($dns.System.state -eq 'failed' -or $dns.Proxy.state -eq 'failed'){$controls.DNSState.Text=$labels.probeFailed}
+  elseif($dns.System.state -eq 'unavailable' -or $dns.Proxy.state -eq 'unavailable'){$controls.DNSState.Text=$labels.serviceUnavailable}
   else{$controls.DNSState.Text=$labels.inconclusive}
  }
  $rtc=$snapshot.WebRTC
  $controls.WebRTCState.Text=switch($rtc.state){'pending'{$labels.checkActive};'warning'{$labels.rtcBypass};'observed-match'{$labels.rtcMatch};'inconclusive'{$labels.inconclusive};'failed'{$labels.probeFailed};default{$labels.notTested}}
  if($snapshot.UDPProtection.ok -and $rtc.state -eq 'inconclusive'){$controls.WebRTCState.Text=$labels.rtcBlocked}
  $risk=$snapshot.IPReputation
- $controls.ReputationState.Text=switch($risk.state){'pending'{$labels.checkActive};'observed'{($labels.reputationObserved -f $risk.score)};'failed'{$labels.probeFailed};default{$labels.noResult}}
+ $controls.ReputationState.Text=switch($risk.state){'pending'{$labels.checkActive};'observed'{($labels.reputationObserved -f $risk.score)};'unavailable'{$labels.serviceUnavailable};'failed'{$labels.probeFailed};default{$labels.noResult}}
  $dnsTone=if($controls.DNSState.Text -eq $labels.probeFailed){'fail'}elseif($controls.DNSState.Text -eq $labels.checkActive){'pending'}else{'neutral'}
  $rtcTone=if($rtc.state -in @('warning','failed')){'fail'}elseif($rtc.state -eq 'observed-match' -and $snapshot.UDPProtection.ok){'pass'}elseif($rtc.state -eq 'pending'){'pending'}else{'neutral'}
  $riskTone=if($risk.state -eq 'failed'){'fail'}elseif($risk.state -eq 'pending'){'pending'}else{'neutral'}
@@ -121,7 +123,12 @@ function Apply-PanelSnapshot($snapshot) {
   Invalidate-PanelLaunch
   if(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){$controls.StatusText.Text=$labels.blocked;$controls.StageText.Text=if(!$snapshot.Proxy.matchesPin){$labels.monitorEgressFailed}else{$labels.udpRuleMissing};Set-UIPresentation 'blocked';$controls.FooterStatus.Text=$labels.footerBlocked}
  }elseif(!$script:backend -and $script:lastPhase -notin @('blocked','stopped')){
-  $controls.StatusText.Text=if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.ready}else{$labels.monitorPartial};$controls.StageText.Text=if($snapshot.WebRTC.state -eq 'warning'){$labels.rtcWarningHint}elseif($snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){$labels.udpReadyHint}else{$labels.monitorPartialHint};if($script:ready -and $snapshot.UDPProtection.ok -and $snapshot.WebRTC.state -eq 'inconclusive'){Set-UIPresentation 'ready'}else{Set-ThemeBrush $controls.StatusText Foreground '#E7E9EA';$controls.StatusGlyph.Text='?';Set-ThemeBrush $controls.StatusGlyph Foreground '#D3AE67';Set-ThemeBrush $controls.StatusIconBackground Background '#272D32'}
+  if($script:ready){
+   $controls.StatusText.Text=$labels.ready;$controls.StageText.Text=$labels.diagnosticsSeparate;Set-UIPresentation 'ready'
+  }else{
+   $controls.StatusText.Text=$labels.monitorPartial;$controls.StageText.Text=$labels.monitorPartialHint
+   Set-ThemeBrush $controls.StatusText Foreground '#E7E9EA';$controls.StatusGlyph.Text='?';Set-ThemeBrush $controls.StatusGlyph Foreground '#D3AE67';Set-ThemeBrush $controls.StatusIconBackground Background '#272D32'
+  }
  }
  if($snapshot.DNS.Paths.state -eq 'warning'){
   Invalidate-PanelLaunch

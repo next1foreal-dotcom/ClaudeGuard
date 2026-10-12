@@ -33,4 +33,15 @@ $snapshot.DNS.System=[pscustomobject]@{state='pending'};Update-PanelDiagnostics 
 Assert-Case ($tones.DNS -eq 'pending') 'Pending DNS is not shown as completed'
 $detail=Get-PanelNetworkDetail ([pscustomobject]@{Browser=[pscustomobject]@{policies=@([pscustomobject]@{browser='Edge';source='HKLM';mode='secure'})};Paths=[pscustomobject]@{IPv4=[pscustomobject]@{state='denial-observed'};IPv6=[pscustomobject]@{state='inconclusive'};DeadProxy=[pscustomobject]@{state='rejected'}}})
 Assert-Case ($detail.Contains($labels.browserDNSUnverified) -and $detail.Contains($labels.inconclusive)) 'Static secure DoH and unavailable IPv6 retain their limits'
+function Invoke-PanelCurl { $e=[Exception]::new('Probe failed (curl 35).');$e.Data['CurlExitCode']=35;throw $e }
+$unavailable=Invoke-PanelReputation '192.0.2.1'
+Assert-Case ($unavailable.state -eq 'unavailable') 'TLS handshake failure describes service availability'
+$dnsUnavailable=Invoke-PanelDNS $false
+Assert-Case ($dnsUnavailable.state -eq 'unavailable') 'DNS result endpoint failure is not a DNS leak verdict'
+$snapshot.DNS.System=$dnsUnavailable;$snapshot.DNS.Proxy=$dnsUnavailable;$snapshot.IPReputation=$unavailable;Update-PanelDiagnostics $snapshot
+Assert-Case ($tones.DNS -eq 'neutral' -and $tones.Reputation -eq 'neutral' -and $controls.DNSState.Text -eq $labels.serviceUnavailable) 'Unavailable optional services stay distinct from broken protection'
+Assert-Case ($controls.DNSState.ToolTip.Contains('curl 35')) 'DNS detail preserves the actual connection error'
+function Invoke-PanelCurl { [pscustomobject]@{Text='{}'} }
+$malformed=Invoke-PanelReputation '192.0.2.1'
+Assert-Case ($malformed.state -eq 'failed') 'Invalid service data remains a failed diagnostic'
 Write-Output ('Diagnostic tests passed: '+$count)

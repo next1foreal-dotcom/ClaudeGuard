@@ -18,7 +18,7 @@
   "checkActive": "检查中",
   "footerRunning": "受管会话运行中 · 持续复核出口",
   "coverage": " 个程序",
-  "ready": "网络检查通过",
+  "ready": "启动保护已就绪",
   "footerStopped": "会话已结束 · 等待重新检查",
   "checkPending": "未检查",
   "stoppedHint": "请重新检查网络。",
@@ -98,5 +98,7 @@
   "pathBypass": "直连或回退异常成功",
   "networkPathWarning": "受管探针直连异常",
   "dohTemplateConfigured": "已设 DoH 端点",
-  "regionalFormat": "区域格式"
+  "regionalFormat": "区域格式",
+  "serviceUnavailable": "检测服务不可用",
+  "diagnosticsSeparate": "附加诊断见下方"
 }
