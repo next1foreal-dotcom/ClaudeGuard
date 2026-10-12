@@ -4,6 +4,7 @@ $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot '.state') -Force|Out-Null
 $ResultFile=Get-GuardStatePath $ResultFile
 if(!$ResultFile){throw 'Setup result path is required.'}
+$script:GuardStatusPath=$ResultFile+'.progress.json'
 try{
  $hostCheck=@{HashAvailable=[bool](Get-Command Get-FileHash -ErrorAction Stop);NativeModulesFirst=(($env:PSModulePath -split ';' )[0] -eq (Join-Path $PSHOME 'Modules'));ScriptSHA256=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()}
  if($Mode -eq 'Discover'){$data=Get-GuardDiscovery}

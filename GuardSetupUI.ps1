@@ -87,6 +87,27 @@ function Set-SetupReview($candidate){
  $ui.ReviewNode.Text=$labels.node+$candidate.NodeName;$ui.ReviewProxy.Text=$candidate.Config.Proxy
  $ui.ReviewPrograms.Text=$labels.programs+(@($candidate.Config.Clients.Name)-join ', ');$ui.ConfirmExit.IsChecked=$false;Set-SetupScreen 2
 }
+function Show-SetupProgress($progress,[int]$elapsed){
+ $caption=switch($progress.Phase){
+  'setup-awaiting-admin'{$labels.awaitAdmin}
+  'setup-installing'{($labels.installRules -f $progress.Detail)}
+  'setup-udp'{$labels.installUDP}
+  'checking-components'{$labels.verifyComponents}
+  'checking-firewall'{$labels.verifyFirewall}
+  'checking-routing'{$labels.verifyRouting}
+  'checking-egress'{$labels.verifyEgress}
+  'ready'{$labels.saving}
+  'setup-saving'{$labels.saving}
+  default{$labels.enableBusy}
+ }
+ $ui.SetupHint.Text=$caption+' '+($labels.elapsed -f $elapsed)
+}
+function Poll-SetupProgress {
+ if(!$script:SetupWorker -or $script:SetupWorker.Mode -ne 'Enable'){return}
+ $progress=$null;$path=$script:SetupWorker.Result+'.progress.json'
+ if(Test-Path -LiteralPath $path){try{$progress=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
+ Show-SetupProgress $progress ([int]([datetimeoffset]::Now-$script:SetupWorker.StartedAt).TotalSeconds)
+}
 function Begin-SetupWorker([string]$mode,$data){
  if($script:SetupBusy){return}
  $script:SetupBusy=$true;$ui.SetupError.Visibility='Collapsed';Update-SetupActions
@@ -97,7 +118,7 @@ function Begin-SetupWorker([string]$mode,$data){
   if($data){$inputPath=Join-Path $root ('.state\setup-input-'+$id+'.json');[IO.File]::WriteAllText($inputPath,($data|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false));$arguments+=' -InputFile "'+$inputPath+'"'}
   if($mode -eq 'Enable'){$arguments+=' -Confirmed -ReviewHash '+$script:SetupCandidate.ReviewHash}
   $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput ($result+'.log') -RedirectStandardError ($result+'.err') -PassThru
-  $script:SetupWorker=@{Process=$process;Result=$result;Mode=$mode}
+  $script:SetupWorker=@{Process=$process;Result=$result;Mode=$mode;StartedAt=[datetimeoffset]::Now}
  }catch{$script:SetupBusy=$false;Show-SetupFailure $_.Exception.Message;Update-SetupActions}
 }
 $ui.ProxyCandidates.Add_SelectionChanged({if($ui.ProxyCandidates.SelectedItem){$ui.SetupProxy.Text=[string]$ui.ProxyCandidates.SelectedItem}})
@@ -117,7 +138,7 @@ function Invoke-SetupNext {
 $ui.SetupNext.Add_Click({Invoke-SetupNext})
 $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[TimeSpan]::FromMilliseconds(300)
 $timer.Add_Tick({
- if(!$script:SetupWorker -or !$script:SetupWorker.Process.HasExited){if(!$script:SetupBusy -and $script:SetupStep -eq 2){Update-SetupActions};return}
+ if(!$script:SetupWorker -or !$script:SetupWorker.Process.HasExited){Poll-SetupProgress;if(!$script:SetupBusy -and $script:SetupStep -eq 2){Update-SetupActions};return}
  $worker=$script:SetupWorker;$script:SetupWorker=$null;$script:SetupBusy=$false
  try{
   if(!(Test-Path -LiteralPath $worker.Result)){throw ('Setup worker exited '+$worker.Process.ExitCode+'. See '+$worker.Result+'.err')}
@@ -151,7 +172,28 @@ if($UiSmokeTest){
  Assert-SetupUI (!$ui.SetupNext.IsEnabled) 'Revoked confirmation disables protection'
  $review.Time=[datetimeoffset]::Now.AddMinutes(-6).ToString('o');$ui.ConfirmExit.IsChecked=$true;Update-SetupActions
  Assert-SetupUI (!$ui.ConfirmExit.IsChecked -and !$ui.ConfirmExit.IsEnabled -and $ui.SetupNext.IsEnabled -and $script:SetupAction -eq 'retest') 'Expired confirmation is revoked and the main action becomes retest'
- function Begin-SetupWorker([string]$mode,$data){$script:SmokeMode=$mode;$script:SmokeSelection=$data}
+ function Show-SetupProgress($progress,[int]$elapsed){
+ $caption=switch($progress.Phase){
+  'setup-awaiting-admin'{$labels.awaitAdmin}
+  'setup-installing'{($labels.installRules -f $progress.Detail)}
+  'setup-udp'{$labels.installUDP}
+  'checking-components'{$labels.verifyComponents}
+  'checking-firewall'{$labels.verifyFirewall}
+  'checking-routing'{$labels.verifyRouting}
+  'checking-egress'{$labels.verifyEgress}
+  'ready'{$labels.saving}
+  'setup-saving'{$labels.saving}
+  default{$labels.enableBusy}
+ }
+ $ui.SetupHint.Text=$caption+' '+($labels.elapsed -f $elapsed)
+}
+function Poll-SetupProgress {
+ if(!$script:SetupWorker -or $script:SetupWorker.Mode -ne 'Enable'){return}
+ $progress=$null;$path=$script:SetupWorker.Result+'.progress.json'
+ if(Test-Path -LiteralPath $path){try{$progress=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json}catch{}}
+ Show-SetupProgress $progress ([int]([datetimeoffset]::Now-$script:SetupWorker.StartedAt).TotalSeconds)
+}
+function Begin-SetupWorker([string]$mode,$data){$script:SmokeMode=$mode;$script:SmokeSelection=$data}
  $script:SmokeMode='';$ui.SetupNext.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
  Assert-SetupUI ($script:SmokeMode -eq 'Probe' -and $script:SmokeSelection.ClientIds[0] -eq 'claude-code' -and $script:SmokeSelection.Proxy -eq 'http://127.0.0.1:17890') 'Expired routed action rechecks the same selection without installing'
  $ui.SetupHint.Text=$labels.enableBusy;Show-SetupFailure 'The exit check expired. Test and confirm again.';Update-SetupActions
@@ -162,6 +204,21 @@ if($UiSmokeTest){
  Assert-SetupUI ($script:SmokeMode -eq 'Enable') 'A fresh explicitly confirmed routed action enables protection'
  $ui.SetupHint.Text=$labels.enableBusy;Show-SetupFailure 'fixture install failure'
  Assert-SetupUI ($ui.SetupHint.Text -eq $labels.reviewHint -and $ui.SetupError.Text -like '*fixture install failure') 'Other installation failures restore the review hint and retain the error'
+ Show-SetupProgress ([pscustomobject]@{Phase='setup-installing';Detail='2/33'}) 15
+ Assert-SetupUI ($ui.SetupHint.Text.Contains('2/33') -and !$ui.SetupHint.Text.Contains($labels.awaitAdmin)) 'Installing reports component progress instead of asking again for UAC'
+ Show-SetupProgress ([pscustomobject]@{Phase='checking-firewall';Detail=''}) 90
+ Assert-SetupUI ($ui.SetupHint.Text.Contains($labels.verifyFirewall) -and $ui.SetupHint.Text.Contains('90')) 'Slow firewall verification shows its actual stage and elapsed time'
+ Show-SetupProgress ([pscustomobject]@{Phase='setup-awaiting-admin';Detail=''}) 3
+ Assert-SetupUI ($ui.SetupHint.Text.Contains($labels.awaitAdmin)) 'Only the elevation stage asks for administrator authorization'
+ Show-SetupFailure 'fixture progress failure'
+ Assert-SetupUI ($ui.SetupHint.Text -eq $labels.reviewHint) 'Failure clears the busy progress stage'
+ $testProgress=Join-Path $root ('.state\setup-smoke-progress-'+[guid]::NewGuid().ToString('N'))
+ $script:SetupWorker=@{Mode='Enable';Result=$testProgress;StartedAt=[datetimeoffset]::Now.AddSeconds(-7)}
+ try{
+  [IO.File]::WriteAllText(($testProgress+'.progress.json'),'{"Phase":"checking-egress"}',[Text.UTF8Encoding]::new($false))
+  Poll-SetupProgress
+  Assert-SetupUI ($ui.SetupHint.Text.Contains($labels.verifyEgress) -and $ui.SetupHint.Text.Contains('7')) 'Running worker progress file reaches the visible setup hint'
+ }finally{$script:SetupWorker=$null;Remove-Item -LiteralPath ($testProgress+'.progress.json') -ErrorAction SilentlyContinue}
  foreach($theme in @('Dark','Light')){
   Set-PanelTheme $theme;Set-SetupSurface
   foreach($box in @($script:SetupChecks)+@($ui.PrepareRuntime,$ui.SetupUDP,$ui.ConfirmExit)){

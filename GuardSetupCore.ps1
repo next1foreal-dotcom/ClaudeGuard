@@ -68,6 +68,7 @@ function Assert-SetupReview($candidate,[bool]$confirmed,[string]$reviewHash){
 function Enable-SetupCandidate($candidate,[bool]$confirmed,[string]$reviewHash){
  Assert-SetupReview $candidate $confirmed $reviewHash
  $config=$candidate.Config
+ Write-GuardStatus 'setup-rechecking' ''
  $selection=[pscustomobject]@{ClientIds=@($config.Clients.Id);Proxy=$config.Proxy;FlClashDirectory=$config.FlClashDirectory;AllowRuntimeDownload=$false;RequireBrowserUDP=$config.RequireBrowserUDP}
  $discovery=Get-GuardDiscovery;$discovery.PythonPath=$config.PythonPath
  $fresh=New-SetupCandidate $selection $discovery
@@ -77,9 +78,11 @@ function Enable-SetupCandidate($candidate,[bool]$confirmed,[string]$reviewHash){
  [IO.File]::WriteAllText($approvedPath,($config|ConvertTo-Json -Depth 15),[Text.UTF8Encoding]::new($false))
  $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
  $arguments='-NoProfile -File "'+(Join-Path $script:GuardRoot 'ClaudeGuard.ps1')+'" -Mode Install -ConfigFile "'+$approvedPath+'" -ReviewHash '+$reviewHash
+ if($script:GuardStatusPath){$arguments+=' -StatusFile '+[char]34+$script:GuardStatusPath+[char]34}
  $proc=Start-Process -FilePath $powershell -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
  if($proc.ExitCode -ne 0){throw 'Protection installation failed or administrator authorization was canceled. Existing configuration was preserved.'}
  $arguments='-NoProfile -File "'+(Join-Path $script:GuardRoot 'ClaudeGuard.ps1')+'" -Mode Check -Client '+[string]$config.Clients[0].Kind+' -ConfigFile "'+$approvedPath+'"'
+ if($script:GuardStatusPath){$arguments+=' -StatusFile '+[char]34+$script:GuardStatusPath+[char]34}
  $proc=Start-Process -FilePath $powershell -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
  if($proc.ExitCode -ne 0){throw 'Post-install checks failed. Previous configuration was preserved; direct-block rules remain fail-closed.'}
  $config=Get-Content -LiteralPath $approvedPath -Raw -Encoding UTF8|ConvertFrom-Json

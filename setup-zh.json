@@ -5,7 +5,7 @@
   "reviewHint": "这些是本次检测结果，确认后才会登记为批准出口。",
   "scanBusy": "正在扫描已安装的程序与代理端口…",
   "probeBusy": "正在核验代理、分流与出口；必要时准备核验组件…",
-  "enableBusy": "正在安装保护并进行完整核验，请完成 Windows 管理员授权。",
+  "enableBusy": "正在复查已确认的出口与程序…",
   "probeButton": "检测出口",
   "enableButton": "启用保护",
   "backButton": "返回修改",
@@ -21,5 +21,14 @@
   "switchDark": "切换深色",
   "retestButton": "重新检测",
   "expiredHint": "出口检测已过期，请重新检测并确认。",
-  "changedHint": "出口、节点或程序已变化，请重新检测并确认。"
+  "changedHint": "出口、节点或程序已变化，请重新检测并确认。",
+  "awaitAdmin": "等待 Windows 管理员授权…",
+  "installRules": "正在登记防火墙规则 {0}…",
+  "installUDP": "正在登记浏览器 UDP 规则…",
+  "verifyComponents": "正在核验程序组件…",
+  "verifyFirewall": "正在核验防火墙规则，可能需要几分钟…",
+  "verifyRouting": "正在核验代理分流与节点…",
+  "verifyEgress": "正在核验实际出口…",
+  "saving": "核验通过，正在保存配置…",
+  "elapsed": "已用 {0} 秒"
 }

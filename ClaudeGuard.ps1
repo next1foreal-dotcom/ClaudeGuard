@@ -29,6 +29,8 @@ try {
             $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
             $arguments='-NoProfile -File "'+$PSCommandPath+'" -Mode '+$Mode
             if($ConfigFile){$arguments+=' -ConfigFile "'+$ConfigFile+'" -ReviewHash '+$ReviewHash}
+            if($script:GuardStatusPath){$arguments+=' -StatusFile '+[char]34+$script:GuardStatusPath+[char]34}
+            Write-GuardStatus 'setup-awaiting-admin' ''
             $child=Start-Process -FilePath $powershell -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -PassThru -Wait
             if($child.ExitCode -ne 0){throw ('Administrator operation failed, exit '+$child.ExitCode+'. Check .state/install-result.json.')}
             if($Mode -eq 'Install'){if($ConfigFile){$script:GuardConfigPath=Get-GuardStatePath $ConfigFile}
@@ -46,22 +48,27 @@ $config=Get-GuardConfig; $programs=@($config.ProtectedPrograms)+@($probe); Asser
             $review=[pscustomobject]@{Config=$config;ReviewHash=$config.Approval.ReviewHash;Time=$config.Approval.ReviewedAt;OwnerSID=$config.Approval.OwnerSID}
             Assert-SetupReview $review ([bool]$config.Approval.Confirmed) $ReviewHash
         }
+        Write-GuardStatus 'checking-components' ''
         $inventory=Get-GuardInventory $config
         if($ConfigFile){Assert-GuardInventory $config $inventory}
         $programs=@($inventory.Programs)+@($probe)
         $source=Join-Path $env:SystemRoot 'System32\curl.exe'
         if(!(Test-Path -LiteralPath $probe)){Copy-Item -LiteralPath $source -Destination $probe}
         if((Get-FileHash -LiteralPath $probe).Hash -ne (Get-FileHash -LiteralPath $source).Hash){throw 'Network probe differs from the Windows curl executable; refusing installation.'}
+        $ruleIndex=0
         foreach($path in $programs) {
+            $ruleIndex++;Write-GuardStatus 'setup-installing' ($ruleIndex.ToString()+'/'+$programs.Count)
             if(!(Test-Path -LiteralPath $path -PathType Leaf)){throw ('Protected program not found: '+$path)}
             $name=Get-GuardRuleName $path
             $existing=Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
             if(!$existing){New-NetFirewallRule -Name $name -DisplayName ('ClaudeGuard: block direct - '+[IO.Path]::GetFileName($path)) -Group $script:GuardGroup -Description 'Block non-loopback IPv4/IPv6 for this executable. An explicitly configured loopback HTTP proxy remains available.' -Direction Outbound -Action Block -Enabled True -Profile Any -Program $path -Protocol Any -RemoteAddress $script:GuardRemote -PolicyStore PersistentStore | Out-Null; $createdRules+=$name}
         }
         if($config.RequireBrowserUDP){
+            Write-GuardStatus 'setup-udp' ''
             & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -File (Join-Path $PSScriptRoot 'BrowserUDPGuard.ps1') -Mode Install
             if($LASTEXITCODE -ne 0){throw 'Browser UDP rule installation failed.'}
         }
+        Write-GuardStatus 'checking-firewall' ''
         Assert-GuardFirewall $programs
         Save-GuardInventory $config $inventory
         $receipt=[pscustomobject]@{Success=$true;Time=(Get-Date).ToString('o');Rules=@($programs | ForEach-Object {Get-GuardRuleName $_});Programs=$programs}
