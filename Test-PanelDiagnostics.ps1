@@ -109,4 +109,42 @@ Assert-Case ($controls.WebRTCState.Text -eq $labels.rtcBlocked -and $tones.WebRT
 $scoped|Add-Member NoteProperty DNS ([pscustomobject]@{System=[pscustomobject]@{state='observed';resolvers=@('192.0.2.1')};Proxy=[pscustomobject]@{state='inconclusive';error='DNS test-name request failed'}})
 Update-PanelDiagnostics $scoped
 Assert-Case ($controls.DNSState.Text -eq ($labels.dnsProxyUnobserved -f 1) -and $controls.DNSState.ToolTip.Contains('DNS test-name request failed')) 'Partial DNS measurement retains observed system result and proxy failure detail'
+$script:transportCalls=@();try{$null=Invoke-PanelHttp 'https://dnsleak.dev/api/new' $false}catch{}
+Assert-Case ($transportCalls[0].arguments -contains 'Accept: application/json') 'DNS API session explicitly requests JSON instead of the default plain-text test ID'
+# A second authoritative service must observe the proxy's own fresh-name lookups.
+$config=[pscustomobject]@{Proxy='http://127.0.0.1:10808';ExpectedIPv4='8.8.8.8'}
+function Invoke-PanelCurl([string]$url,[bool]$direct){Invoke-PanelHttp $url $direct}
+$script:dnsMode='ok';$script:dnsCalls=@();$script:triggerCalls=@();$script:polls=0
+function Start-Sleep { param($Milliseconds,$Seconds) }
+function Invoke-PanelHttp([string]$url,[bool]$direct){
+ $script:dnsCalls+=@{url=$url;direct=$direct}
+ if($url -eq 'https://dnsleak.dev/api/new'){
+  $ip=if($script:dnsMode -eq 'wrong-exit'){'9.9.9.9'}else{'8.8.8.8'}
+  $names=if($script:dnsMode -eq 'bad-host'){@('abc123-a01.evil.example','abc123-q01.t.dnsleak.dev')}else{@('abc123-a01.t.dnsleak.dev','abc123-q01.t.dnsleak.dev')}
+  return [pscustomobject]@{Text=(@{testId='abc123';client=@{ip=$ip};hostnames=$names}|ConvertTo-Json -Depth 4)}
+ }
+ $script:polls++
+ $id=if($script:dnsMode -eq 'wrong-session'){'other123'}else{'abc123'}
+ $servers=if($script:dnsMode -eq 'empty' -or ($script:dnsMode -eq 'delayed' -and $script:polls -eq 1)){@()}else{@(@{ip='1.1.1.1';role='resolver';original=2;sawA=$true;sawQ=$true;countryCode='US'})}
+ return [pscustomobject]@{Text=(@{testId=$id;client=@{ip='8.8.8.8'};lookups=2;resolvers=$servers}|ConvertTo-Json -Depth 5)}
+}
+function Invoke-PanelCurlAttempt([string]$exe,[string[]]$arguments){$script:triggerCalls+=@{exe=$exe;arguments=$arguments};[pscustomobject]@{ExitCode=60;Text='Certificate error after name lookup';Milliseconds=1}}
+$measured=Invoke-PanelProxyDNSFallback
+Assert-Case ($measured.state -eq 'observed' -and $measured.resolvers.Count -eq 1 -and $measured.source -eq 'dnsleak.dev') 'Independent authoritative result recovers proxy DNS despite expected probe TLS errors'
+Assert-Case ($triggerCalls.Count -eq 2 -and @($triggerCalls|Where-Object {$_.exe -ne 'owned-probe.exe' -or $_.arguments -notcontains $config.Proxy -or $_.arguments -contains '--insecure' -or $_.arguments -contains '--connect-to'}).Count -eq 0) 'Fresh DNS names use exact proxy hostname requests without TLS bypass or external resolution'
+Assert-Case (@($dnsCalls|Where-Object direct).Count -eq 0 -and $measured.observedA -and $measured.observedAAAA) 'Session and results use same proxy and include both query families'
+$script:dnsMode='delayed';$script:polls=0
+Assert-Case ((Invoke-PanelProxyDNSFallback).state -eq 'observed' -and $script:polls -eq 2) 'Delayed authoritative observations receive a bounded second poll'
+$script:dnsMode='empty';$script:polls=0
+Assert-Case ((Invoke-PanelProxyDNSFallback).state -eq 'inconclusive' -and $script:polls -eq 3) 'Empty authoritative results stay inconclusive after bounded polling'
+foreach($mode in @('wrong-exit','bad-host','wrong-session')){
+ $script:dnsMode=$mode;$script:triggerCalls=@()
+ $rejected=Invoke-PanelProxyDNSFallback
+ Assert-Case ($rejected.state -eq 'failed') ('Reject unrelated DNS response: '+$mode)
+ if($mode -ne 'wrong-session'){Assert-Case ($triggerCalls.Count -eq 0) ('Do not trigger names before validation: '+$mode)}
+}
+$script:dnsMode='ok'
+function Invoke-PanelCurl([string]$url,[bool]$direct){if($url -like 'https://dnsleak.dev/*'){return Invoke-PanelHttp $url $direct};[pscustomobject]@{Text='{"dns_servers":[]}'}}
+$integrated=Invoke-PanelDNS $false
+Assert-Case ($integrated.state -eq 'observed' -and $integrated.source -eq 'dnsleak.dev' -and $integrated.previousSource -eq 'ip.net.coffee') 'Actual panel DNS caller uses the authoritative fallback when primary observes nothing'
 Write-Output ('Diagnostic tests passed: '+$count)

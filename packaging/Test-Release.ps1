@@ -120,8 +120,8 @@ function Invoke-FreshLauncherSmoke([string]$Executable, [string]$Destination) {
 }
 if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
     $dist = Join-Path $RepoRoot 'dist'
-    $candidate = @(Get-ChildItem -LiteralPath $dist -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'v1.0.10-*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
-    if ($candidate.Count -ne 1) { throw 'Pass -BuildDirectory or create one dist/v1.0.10-* output first.' }
+    $candidate = @(Get-ChildItem -LiteralPath $dist -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'v1.0.11-*' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+    if ($candidate.Count -ne 1) { throw 'Pass -BuildDirectory or create one dist/v1.0.11-* output first.' }
     $BuildDirectory = $candidate[0].FullName
 }
 $BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
@@ -129,7 +129,7 @@ $receiptPath = Join-Path $BuildDirectory 'release-receipt.json'
 $sumPath = Join-Path $BuildDirectory 'SHA256SUMS'
 $receipt = Get-Content -LiteralPath $receiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $exePath = Join-Path $BuildDirectory ([string]$receipt.executable)
-Assert-Release ($receipt.status -ne 'failed' -and [string]$receipt.version -eq '1.0.10') 'release receipt identifies version 1.0.10'
+Assert-Release ($receipt.status -ne 'failed' -and [string]$receipt.version -eq '1.0.11') 'release receipt identifies version 1.0.11'
 Assert-Release ([bool]$receipt.unsigned) 'release receipt records unsigned build'
 Assert-Release ([string]$receipt.sourceSHA -match '^[0-9a-f]{40}$') 'release receipt records source commit SHA'
 Assert-Release ((Test-Path -LiteralPath $exePath -PathType Leaf)) 'single EXE exists'
@@ -147,7 +147,7 @@ $subsystemOffset = if ($magic -eq 0x20b) { $optional + 68 } else { $optional + 6
 $subsystem = [BitConverter]::ToUInt16($pe, $subsystemOffset)
 Assert-Release ($machine -eq 0x8664) 'EXE is Windows x64'
 Assert-Release ($subsystem -eq 2) 'EXE is GUI subsystem'
-Assert-Release (([Diagnostics.FileVersionInfo]::GetVersionInfo($exePath).FileVersion) -like '1.0.10.0*') 'EXE file version is 1.0.10.0'
+Assert-Release (([Diagnostics.FileVersionInfo]::GetVersionInfo($exePath).FileVersion) -like '1.0.11.0*') 'EXE file version is 1.0.11.0'
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ClaudeGuard release test ' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
@@ -156,7 +156,7 @@ try {
     $verifyExit = Invoke-OwnedProcess $exePath @('--verify-only', '--receipt', $verifyReceipt)
     Assert-Release ($verifyExit -eq 0) '--verify-only exits successfully'
     $verify = Get-Content -LiteralPath $verifyReceipt -Raw -Encoding UTF8 | ConvertFrom-Json
-    Assert-Release ([string]$verify.status -eq 'success' -and [string]$verify.version -eq '1.0.10') '--verify-only receipt is successful'
+    Assert-Release ([string]$verify.status -eq 'success' -and [string]$verify.version -eq '1.0.11') '--verify-only receipt is successful'
     Assert-Release ([string]$verify.payloadSha256 -eq [string]$receipt.payloadSHA256) '--verify-only payload hash matches build receipt'
 
     $destination = Join-Path $testRoot 'payload destination with spaces'

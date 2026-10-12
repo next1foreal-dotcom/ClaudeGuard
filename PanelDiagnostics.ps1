@@ -13,6 +13,7 @@ function Invoke-PanelHttp([string]$url,[bool]$direct) {
  $exe=if($direct){Join-Path $env:SystemRoot 'System32\curl.exe'}else{Get-GuardProbePath}
  $base=@('--silent','--show-error','--fail','--ipv4','--connect-timeout','2','--max-time','5','--max-filesize','1048576')
  if($direct){$base+=@('--noproxy','*')}else{$base+=@('--proxy',[string]$config.Proxy,'--noproxy','localhost,127.0.0.1,::1')}
+ if($url -match '^https://dnsleak\.dev/api/'){$base+=@('-H','Accept: application/json')}
  $attempt=Invoke-PanelCurlAttempt $exe ($base+@($url));$elapsed=$attempt.Milliseconds
  if($attempt.ExitCode -eq 0){return [pscustomobject]@{Text=$attempt.Text;Milliseconds=$elapsed;Resolution='configured-route'}}
  $originalCode=$attempt.ExitCode;$uri=[uri]$url
@@ -44,6 +45,45 @@ function Set-PanelDiagnosticFailure($result,$exception) {
  $result.error=$exception.Message
 }
 function New-PanelDiagnostic([string]$scope) {return [pscustomobject]@{state='pending';scope=$scope;Time=(Get-Date).ToString('o');error=$null}}
+function Invoke-PanelProxyDNSFallback {
+ $result=New-PanelDiagnostic 'HTTP proxy fresh-name DNS; dnsleak.dev authoritative observations, not a global leak verdict'
+ $result|Add-Member NoteProperty source 'dnsleak.dev'
+ try {
+  $session=(Invoke-PanelCurl 'https://dnsleak.dev/api/new' $false).Text|ConvertFrom-Json
+  $id=[string]$session.testId;$names=@($session.hostnames)
+  if($id -cnotmatch '^[a-z0-9]{6,64}$' -or !$config.ExpectedIPv4 -or $session.client.ip -ne $config.ExpectedIPv4){throw 'DNS session does not match the approved proxy exit.'}
+  $pattern='^'+[regex]::Escape($id)+'-(a|q)[0-9]{2}\.t\.dnsleak\.dev$'
+  if($names.Count -lt 2 -or $names.Count -gt 16 -or @($names|Select-Object -Unique).Count -ne $names.Count -or @($names|Where-Object {$_ -cnotmatch $pattern}).Count -or !@($names|Where-Object {$_ -match '-a[0-9]{2}\.'}).Count -or !@($names|Where-Object {$_ -match '-q[0-9]{2}\.'}).Count){throw 'DNS service returned an unexpected measurement hostname set.'}
+  $base=@('--silent','--show-error','--fail','--proxy',[string]$config.Proxy,'--noproxy','localhost,127.0.0.1,::1','--connect-timeout','2','--max-time','3','--max-filesize','65536')
+  $triggers=@();$exe=Get-GuardProbePath
+  foreach($name in $names){
+   # Only the proxy resolves these single-use names. TLS failure after lookup is expected.
+   $attempt=Invoke-PanelCurlAttempt $exe ($base+@(('https://'+$name+'/')))
+   $triggers+=@([pscustomobject]@{host=$name;exitCode=$attempt.ExitCode})
+  }
+  $servers=@();$observedA=$false;$observedAAAA=$false;$lookups=0
+  for($poll=0;$poll -lt 3;$poll++){
+   Start-Sleep -Milliseconds 1000
+   $data=(Invoke-PanelCurl ('https://dnsleak.dev/api/result/'+$id) $false).Text|ConvertFrom-Json
+   if($data.testId -cne $id -or $data.client.ip -ne $config.ExpectedIPv4){throw 'DNS result does not match the requested session and approved exit.'}
+   # Ignore the service's heuristic verdict and any secondary/observer resolver echoes.
+   $entries=@($data.resolvers|Where-Object {$_.role -eq 'resolver' -and $_.original -gt 0 -and (Test-PanelPublicIPv4 ([string]$_.ip))})
+   $servers=@($entries|Select-Object -ExpandProperty ip -Unique)
+   $observedA=@($entries|Where-Object sawA).Count -gt 0;$observedAAAA=@($entries|Where-Object sawQ).Count -gt 0;$lookups=[int]$data.lookups
+   if($servers.Count -and $observedA -and $observedAAAA -and $lookups -ge $names.Count){break}
+  }
+  $result|Add-Member NoteProperty resolvers $servers
+  $result|Add-Member NoteProperty resolverCountries @($entries|Select-Object -ExpandProperty countryCode -Unique)
+  $result|Add-Member NoteProperty observedA $observedA
+  $result|Add-Member NoteProperty observedAAAA $observedAAAA
+  $result|Add-Member NoteProperty lookups $lookups
+  $result|Add-Member NoteProperty requestedLookups $names.Count
+  $result|Add-Member NoteProperty triggers $triggers
+  $result.state=if($servers.Count -and $observedA -and $observedAAAA -and $lookups -ge $names.Count){'observed'}else{'inconclusive'}
+  if($result.state -eq 'inconclusive'){$result.error='Authoritative DNS observations are incomplete.'}
+ }catch{Set-PanelDiagnosticFailure $result $_.Exception}
+ $result.Time=(Get-Date).ToString('o');return $result
+}
 function Invoke-PanelDNS([bool]$direct) {
  $scope=if($direct){'Windows system DNS'}else{'HTTP proxy probe-domain DNS'}
  $result=New-PanelDiagnostic $scope
@@ -61,6 +101,13 @@ function Invoke-PanelDNS([bool]$direct) {
   $result.state=if($servers.Count){'observed'}else{'inconclusive'}
   if(!$servers.Count -and $triggerError){$result.error='DNS test-name request failed: '+$triggerError}
  }catch{Set-PanelDiagnosticFailure $result $_.Exception}
+ if(!$direct -and $result.state -ne 'observed'){
+  $fallback=Invoke-PanelProxyDNSFallback
+  $fallback|Add-Member NoteProperty previousSource 'ip.net.coffee'
+  $fallback|Add-Member NoteProperty previousState $result.state
+  $fallback|Add-Member NoteProperty previousError $result.error
+  $result=$fallback
+ }
  $result.Time=(Get-Date).ToString('o');return $result
 }
 function Invoke-PanelReputation([string]$ip) {

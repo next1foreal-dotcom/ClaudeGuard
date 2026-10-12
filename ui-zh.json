@@ -44,6 +44,8 @@
   "monitorPartial": "网络检查结果需复核",
   "countryJP": "日本",
   "reputationScope": "NetCoffee 第三方网段缓存评分，不是 Claude 官方结论、封禁概率或该单个 IP 的即时评分。",
+  "dnsSourceDetail": "代理检测来源：{0}",
+  "dnsCoverageDetail": "已观测查询：{0}/{1}（A / AAAA）",
   "dnsScope": "分别观测 Windows 系统与 HTTP 代理测试域名的解析器；数量及解析器不同均不能证明泄漏或防护通过，不代表日常浏览器与所有 Claude 域名。",
   "locationAllowed": "已开启",
   "notTested": "未检测",

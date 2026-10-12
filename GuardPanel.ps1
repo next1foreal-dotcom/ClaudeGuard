@@ -35,6 +35,8 @@ function Get-PanelDiagnosticDetail($value,[string]$scope) {
  if($value.System){$detail+="`n"+($labels.dnsSystemDetail -f (@($value.System.resolvers) -join ', '))+"`n"+($labels.dnsProxyDetail -f (@($value.Proxy.resolvers) -join ', '))}
  elseif($value.publicIPs){$detail+="`n"+($labels.rtcAddressesDetail -f (@($value.publicIPs) -join ', '))}
  elseif($value.cidr){$detail+="`n"+($labels.reputationNetworkDetail -f $value.cidr)+"`n"+($labels.reputationKindDetail -f $value.category)}
+ if($value.Proxy.source){$detail+="`n"+($labels.dnsSourceDetail -f $value.Proxy.source)}
+ if($value.Proxy.requestedLookups){$detail+="`n"+($labels.dnsCoverageDetail -f $value.Proxy.lookups,$value.Proxy.requestedLookups)}
  foreach($entry in @($value.System,$value.Proxy)){if($entry.error){$detail+="`n"+$entry.scope+': '+$entry.error}}
  if($value.Time){$detail+="`n"+$labels.updated+([datetimeoffset]$value.Time).ToLocalTime().ToString('HH:mm:ss')}
  if($value.error){$detail+="`n"+$labels.diagnosticErrorDetail+$value.error}
