@@ -7,16 +7,7 @@ $config=Get-GuardConfig
 $state=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '.state'))+[IO.Path]::DirectorySeparatorChar
 foreach($path in @($SnapshotPath,$StopPath,$RefreshPath)){if($path -and ![IO.Path]::GetFullPath($path).StartsWith($state,[StringComparison]::OrdinalIgnoreCase)){throw 'Panel paths must remain within .state.'}}
 if(!$SnapshotPath){$SnapshotPath=Join-Path $PSScriptRoot '.state\panel-snapshot.json'}
-function Invoke-PanelCurl([string]$url,[bool]$direct){
- $exe=if($direct){Join-Path $env:SystemRoot 'System32\curl.exe'}else{Get-GuardProbePath}
- $arguments=@('--silent','--show-error','--fail','--ipv4','--connect-timeout','2','--max-time','5')
- if($direct){$arguments+=@('--noproxy','*')}else{$arguments+=@('--proxy',[string]$config.Proxy,'--noproxy','localhost,127.0.0.1,::1')}
- $arguments+=@($url)
- $watch=[Diagnostics.Stopwatch]::StartNew();$previous=$ErrorActionPreference
- try{$ErrorActionPreference='Continue';$raw=& $exe @arguments 2>&1;$exitCode=$LASTEXITCODE}finally{$ErrorActionPreference=$previous;$watch.Stop()}
- if($exitCode -ne 0){$failure=[Exception]::new(('Probe failed (curl '+$exitCode+').'));$failure.Data['CurlExitCode']=$exitCode;throw $failure}
- return [pscustomobject]@{Text=($raw -join "`n");Milliseconds=[int]$watch.ElapsedMilliseconds}
-}
+function Invoke-PanelCurl([string]$url,[bool]$direct){return Invoke-PanelHttp $url $direct}
 function Read-Trace([string]$text){
  $fields=@{};foreach($line in $text -split '\r?\n'){if($line -match '^([a-z_]+)=(.*)$'){$fields[$matches[1]]=$matches[2].Trim()}}
  if(!$fields.ip -or !$fields.loc){throw 'Trace does not contain IP and country.'}

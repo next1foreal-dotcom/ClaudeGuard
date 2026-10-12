@@ -72,4 +72,41 @@ $fixture.WebRTC.Time=$now;$fixture.ExitMetadata.ip='192.0.2.99'
 Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'unverified') 'Old exit metadata never passes for a new exit'
 $fixture.ExitMetadata.ip='192.0.2.1';$fixture.WebRTC.environment.systemTimezoneId='US Mountain Standard Time'
 Assert-Case ((Get-PanelTimezoneVerdict $fixture) -eq 'unverified') 'Browser reading from before a system timezone change cannot pass'
+# Reproduce domain-connect TLS EOF with a successful same-proxy IPv4 destination.
+$config=[pscustomobject]@{Proxy='http://127.0.0.1:10808'}
+function Get-GuardProbePath { 'owned-probe.exe' }
+$script:transportCalls=@()
+function Invoke-PanelCurlAttempt([string]$exe,[string[]]$arguments){
+ $script:transportCalls+=@([pscustomobject]@{exe=$exe;arguments=$arguments})
+ if($arguments -contains '--connect-to'){return [pscustomobject]@{ExitCode=0;Text='{"ip":"192.0.2.1"}';Milliseconds=1}}
+ if($arguments[-1] -like 'https://cloudflare-dns.com/*'){return [pscustomobject]@{ExitCode=0;Text='{"Status":0,"Answer":[{"type":1,"data":"104.21.53.138"}]}';Milliseconds=1}}
+ return [pscustomobject]@{ExitCode=35;Text='TLS EOF';Milliseconds=1}
+}
+$recovered=Invoke-PanelHttp 'https://ip.net.coffee/api/example' $false
+Assert-Case ($recovered.Resolution -eq 'proxy-doh-ipv4' -and $transportCalls.Count -eq 3) 'Domain TLS failure recovers through encrypted DNS and the same proxy'
+Assert-Case (@($transportCalls|Where-Object {$_.exe -ne 'owned-probe.exe' -or $_.arguments -notcontains $config.Proxy -or $_.arguments -contains '--insecure' -or $_.arguments -contains '*'}).Count -eq 0) 'Fallback never bypasses protected curl proxy or TLS validation'
+Assert-Case ($transportCalls[-1].arguments -contains 'ip.net.coffee:443:104.21.53.138:443' -and $transportCalls[-1].arguments[-1] -eq 'https://ip.net.coffee/api/example') 'Retry preserves HTTPS URL and hostname while changing CONNECT destination'
+$script:transportCalls=@();try{$null=Invoke-PanelHttp 'https://unique.d.ip.net.coffee/pixel.gif' $false}catch{}
+Assert-Case ($transportCalls.Count -eq 1) 'DNS resolver measurement names never use the substitute resolver'
+$script:transportCalls=@();try{$null=Invoke-PanelHttp 'https://claude.ai/cdn-cgi/trace' $false}catch{}
+Assert-Case ($transportCalls.Count -eq 1) 'Startup trace hosts cannot use diagnostic fallback'
+$script:transportCalls=@();try{$null=Invoke-PanelHttp 'https://ipinfo.io/json' $true}catch{}
+Assert-Case ($transportCalls.Count -eq 1) 'Direct comparison route is never substituted'
+function Invoke-PanelCurlAttempt([string]$exe,[string[]]$arguments){
+ $script:transportCalls+=@([pscustomobject]@{exe=$exe;arguments=$arguments})
+ if($arguments[-1] -like 'https://cloudflare-dns.com/*'){return [pscustomobject]@{ExitCode=0;Text='{"Status":0,"Answer":[{"type":1,"data":"127.0.0.1"},{"type":1,"data":"10.0.0.1"}]}';Milliseconds=1}}
+ return [pscustomobject]@{ExitCode=35;Text='TLS EOF';Milliseconds=1}
+}
+$script:transportCalls=@();try{$null=Invoke-PanelHttp 'https://ipinfo.io/json' $false}catch{}
+Assert-Case ($transportCalls.Count -eq 2) 'Encrypted DNS cannot redirect diagnostic retries to loopback or private addresses'
+$scoped=[pscustomobject]@{WebRTC=[pscustomobject]@{state='inconclusive';BrowserPath='C:\Edge\msedge.exe'};UDPProtection=[pscustomobject]@{ok=$false;programs=@([pscustomobject]@{program='C:\Edge\msedge.exe';ok=$true},[pscustomobject]@{program='C:\Codex\app.exe';ok=$false})}}
+Assert-Case (Test-PanelRTCProtection $scoped) 'Isolated Edge UDP audit is independent of unrelated Codex path'
+$scoped.UDPProtection.programs[0].ok=$false
+Assert-Case (!(Test-PanelRTCProtection $scoped)) 'Missing rule for the actual probe browser never passes'
+$scoped.UDPProtection.programs[0].ok=$true
+Update-PanelDiagnostics $scoped
+Assert-Case ($controls.WebRTCState.Text -eq $labels.rtcBlocked -and $tones.WebRTC -eq 'neutral') 'Actual browser block explains empty candidates without claiming leak-free pass'
+$scoped|Add-Member NoteProperty DNS ([pscustomobject]@{System=[pscustomobject]@{state='observed';resolvers=@('192.0.2.1')};Proxy=[pscustomobject]@{state='inconclusive';error='DNS test-name request failed'}})
+Update-PanelDiagnostics $scoped
+Assert-Case ($controls.DNSState.Text -eq ($labels.dnsProxyUnobserved -f 1) -and $controls.DNSState.ToolTip.Contains('DNS test-name request failed')) 'Partial DNS measurement retains observed system result and proxy failure detail'
 Write-Output ('Diagnostic tests passed: '+$count)

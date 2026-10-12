@@ -1,3 +1,43 @@
+function Invoke-PanelCurlAttempt([string]$exe,[string[]]$arguments) {
+ $watch=[Diagnostics.Stopwatch]::StartNew();$previous=$ErrorActionPreference
+ try{$ErrorActionPreference='Continue';$raw=& $exe @arguments 2>&1;$code=$LASTEXITCODE}finally{$ErrorActionPreference=$previous;$watch.Stop()}
+ return [pscustomobject]@{ExitCode=$code;Text=($raw -join "`n");Milliseconds=[int]$watch.ElapsedMilliseconds}
+}
+function Test-PanelPublicIPv4([string]$value) {
+ $address=$null
+ if($value -notmatch '^\d{1,3}(\.\d{1,3}){3}$' -or ![ipaddress]::TryParse($value,[ref]$address) -or $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork){return $false}
+ $b=$address.GetAddressBytes()
+ return !($b[0] -in @(0,10,127) -or $b[0] -ge 224 -or ($b[0] -eq 169 -and $b[1] -eq 254) -or ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) -or ($b[0] -eq 192 -and ($b[1] -eq 168 -or ($b[1] -eq 0 -and $b[2] -in @(0,2)))) -or ($b[0] -eq 100 -and $b[1] -ge 64 -and $b[1] -le 127) -or ($b[0] -eq 198 -and ($b[1] -in @(18,19) -or ($b[1] -eq 51 -and $b[2] -eq 100))) -or ($b[0] -eq 203 -and $b[1] -eq 0 -and $b[2] -eq 113))
+}
+function Invoke-PanelHttp([string]$url,[bool]$direct) {
+ $exe=if($direct){Join-Path $env:SystemRoot 'System32\curl.exe'}else{Get-GuardProbePath}
+ $base=@('--silent','--show-error','--fail','--ipv4','--connect-timeout','2','--max-time','5','--max-filesize','1048576')
+ if($direct){$base+=@('--noproxy','*')}else{$base+=@('--proxy',[string]$config.Proxy,'--noproxy','localhost,127.0.0.1,::1')}
+ $attempt=Invoke-PanelCurlAttempt $exe ($base+@($url));$elapsed=$attempt.Milliseconds
+ if($attempt.ExitCode -eq 0){return [pscustomobject]@{Text=$attempt.Text;Milliseconds=$elapsed;Resolution='configured-route'}}
+ $originalCode=$attempt.ExitCode;$uri=[uri]$url
+ # Only optional diagnostic API hosts. Never change DNS measurement names or startup trace routing.
+ $hosts=@('ipinfo.io','ipwho.is','ipapi.co','ip.net.coffee')
+ if(!$direct -and $originalCode -in @(6,7,28,35) -and $uri.Scheme -eq 'https' -and $uri.Port -eq 443 -and !$uri.UserInfo -and $uri.Host -in $hosts){
+  try {
+   $dnsUrl='https://cloudflare-dns.com/dns-query?name='+[uri]::EscapeDataString($uri.Host)+'&type=A'
+   $dns=Invoke-PanelCurlAttempt $exe ($base+@('-H','accept: application/dns-json',$dnsUrl));$elapsed+=$dns.Milliseconds
+   if($dns.ExitCode -eq 0){
+    $answer=$dns.Text|ConvertFrom-Json
+    if($answer.Status -eq 0){
+     $addresses=@($answer.Answer|Where-Object {$_.type -eq 1 -and (Test-PanelPublicIPv4 ([string]$_.data))}|Select-Object -ExpandProperty data -Unique|Select-Object -First 2)
+     foreach($address in $addresses){
+      # --connect-to retains the original HTTPS host, SNI and certificate verification.
+      $mapping=$uri.Host+':443:'+ $address+':443'
+      $retry=Invoke-PanelCurlAttempt $exe ($base+@('--connect-to',$mapping,$url));$elapsed+=$retry.Milliseconds
+      if($retry.ExitCode -eq 0){return [pscustomobject]@{Text=$retry.Text;Milliseconds=$elapsed;Resolution='proxy-doh-ipv4'}}
+     }
+    }
+   }
+  }catch{ } # The original request remains a failure if the bounded fallback cannot complete.
+ }
+ $failure=[Exception]::new(('Probe failed (curl '+$originalCode+').'));$failure.Data['CurlExitCode']=$originalCode;throw $failure
+}
 function Set-PanelDiagnosticFailure($result,$exception) {
  # Transport/HTTP failures describe test-service availability, never a leak verdict.
  $result.state=if($exception.Data.Contains('CurlExitCode')){'unavailable'}else{'failed'}
@@ -7,18 +47,19 @@ function New-PanelDiagnostic([string]$scope) {return [pscustomobject]@{state='pe
 function Invoke-PanelDNS([bool]$direct) {
  $scope=if($direct){'Windows system DNS'}else{'HTTP proxy probe-domain DNS'}
  $result=New-PanelDiagnostic $scope
- $token=[guid]::NewGuid().ToString('N')
+ $token=[guid]::NewGuid().ToString('N');$triggerError=$null
  try {
   if($direct){
    $null=Resolve-DnsName -Name ($token+'-1.d.ip.net.coffee') -Type A -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue
   }else{
    # Request only the public test name through the pinned HTTP proxy. A failed image load can still resolve DNS.
-   try{$null=Invoke-PanelCurl ('https://'+$token+'-1.d.ip.net.coffee/pixel.gif') $false}catch{}
+   try{$null=Invoke-PanelCurl ('https://'+$token+'-1.d.ip.net.coffee/pixel.gif') $false}catch{$triggerError=$_.Exception.Message}
   }
   $data=(Invoke-PanelCurl ('https://ip.net.coffee/api/dns/result/'+$token) $false).Text|ConvertFrom-Json
   $servers=@($data.dns_servers | Where-Object {$_ -and [ipaddress]::TryParse([string]$_,[ref]([ipaddress]::None))})
   $result|Add-Member NoteProperty resolvers $servers
   $result.state=if($servers.Count){'observed'}else{'inconclusive'}
+  if(!$servers.Count -and $triggerError){$result.error='DNS test-name request failed: '+$triggerError}
  }catch{Set-PanelDiagnosticFailure $result $_.Exception}
  $result.Time=(Get-Date).ToString('o');return $result
 }
@@ -69,6 +110,7 @@ function Invoke-PanelWebRTC([string]$ip,[string]$BrowserPath,[switch]$Environmen
   $result=($raw -join "`n")|ConvertFrom-Json
   $result|Add-Member NoteProperty Time (Get-Date).ToString('o')
   $result|Add-Member NoteProperty Browser ([IO.Path]::GetFileName($edge))
+  $result|Add-Member NoteProperty BrowserPath $edge
   if($result.environment -and $zoneBefore -eq (Get-TimeZone).Id){$result.environment|Add-Member NoteProperty systemTimezoneId $zoneBefore}
  }catch{$result=New-PanelDiagnostic $scope;$result.state='failed';$result.error=$_.Exception.Message}
  finally{if($job){$job.Dispose()};if($ownsMutex){$mutex.ReleaseMutex()};if($mutex){$mutex.Dispose()}}

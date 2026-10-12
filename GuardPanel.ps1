@@ -59,30 +59,38 @@ function Get-PanelNetworkDetail($dns) {
  }
  return $detail
 }
+function Test-PanelRTCProtection($snapshot) {
+ $entries=@($snapshot.UDPProtection.programs)
+ if($snapshot.WebRTC.BrowserPath){return @($entries|Where-Object {$_.program -ieq $snapshot.WebRTC.BrowserPath -and $_.ok}).Count -eq 1}
+ # Compatibility with snapshots predating per-program results.
+ return (!$snapshot.UDPProtection.programs -and [bool]$snapshot.UDPProtection.ok)
+}
 function Update-PanelDiagnostics($snapshot) {
+ $rtcProtected=Test-PanelRTCProtection $snapshot
  $dns=$snapshot.DNS
  $controls.DNSState.Text=$labels.notTested
  if($dns.System -and $dns.Proxy){
   if($dns.System.state -eq 'pending' -or $dns.Proxy.state -eq 'pending'){$controls.DNSState.Text=$labels.checkActive}
   elseif($dns.System.state -eq 'observed' -and $dns.Proxy.state -eq 'observed'){$controls.DNSState.Text=($labels.dnsObserved -f @($dns.System.resolvers).Count,@($dns.Proxy.resolvers).Count)}
+  elseif($dns.System.state -eq 'observed' -and $dns.Proxy.state -eq 'inconclusive'){$controls.DNSState.Text=($labels.dnsProxyUnobserved -f @($dns.System.resolvers).Count)}
   elseif($dns.System.state -eq 'failed' -or $dns.Proxy.state -eq 'failed'){$controls.DNSState.Text=$labels.probeFailed}
   elseif($dns.System.state -eq 'unavailable' -or $dns.Proxy.state -eq 'unavailable'){$controls.DNSState.Text=$labels.serviceUnavailable}
   else{$controls.DNSState.Text=$labels.inconclusive}
  }
  $rtc=$snapshot.WebRTC
  $controls.WebRTCState.Text=switch($rtc.state){'pending'{$labels.checkActive};'warning'{$labels.rtcBypass};'observed-match'{$labels.rtcMatch};'inconclusive'{$labels.inconclusive};'failed'{$labels.probeFailed};default{$labels.notTested}}
- if($snapshot.UDPProtection.ok -and $rtc.state -eq 'inconclusive'){$controls.WebRTCState.Text=$labels.rtcBlocked}
+ if($rtcProtected -and $rtc.state -eq 'inconclusive'){$controls.WebRTCState.Text=$labels.rtcBlocked}
  $risk=$snapshot.IPReputation
  $controls.ReputationState.Text=switch($risk.state){'pending'{$labels.checkActive};'observed'{($labels.reputationObserved -f $risk.score)};'unavailable'{$labels.serviceUnavailable};'failed'{$labels.probeFailed};default{$labels.noResult}}
  $dnsTone=if($controls.DNSState.Text -eq $labels.probeFailed){'fail'}elseif($controls.DNSState.Text -eq $labels.checkActive){'pending'}else{'neutral'}
- $rtcTone=if($rtc.state -in @('warning','failed')){'fail'}elseif($rtc.state -eq 'observed-match' -and $snapshot.UDPProtection.ok){'pass'}elseif($rtc.state -eq 'pending'){'pending'}else{'neutral'}
+ $rtcTone=if($rtc.state -in @('warning','failed')){'fail'}elseif($rtc.state -eq 'observed-match' -and $rtcProtected){'pass'}elseif($rtc.state -eq 'pending'){'pending'}else{'neutral'}
  $riskTone=if($risk.state -eq 'failed'){'fail'}elseif($risk.state -eq 'pending'){'pending'}else{'neutral'}
  foreach($row in @(@('DNS',$dnsTone),@('WebRTC',$rtcTone),@('Reputation',$riskTone))){
   $name=$row[0];$tone=$row[1];Set-PanelTone $name $tone
   $controls[$name+'Mark'].Text=switch($tone){'fail'{'!'}'pass'{[string][char]0x2713}'pending'{[string][char]0x25CB}default{[string][char]0x00B7}}
  }
  $controls.DNSState.ToolTip=(Get-PanelDiagnosticDetail $dns $labels.dnsScope)+(Get-PanelNetworkDetail $dns)
- $controls.WebRTCState.ToolTip=(Get-PanelDiagnosticDetail $rtc $labels.webRTCScope)+"`n"+$(if($snapshot.UDPProtection.ok){$labels.udpRuleVerified}else{$labels.udpRuleMissing})
+ $controls.WebRTCState.ToolTip=(Get-PanelDiagnosticDetail $rtc $labels.webRTCScope)+"`n"+$(if($rtcProtected){$labels.udpRuleVerified}else{$labels.udpRuleMissing})
  $controls.ReputationState.ToolTip=Get-PanelDiagnosticDetail $risk $labels.reputationScope
 }
 function Get-PanelTimezoneVerdict($snapshot) {
