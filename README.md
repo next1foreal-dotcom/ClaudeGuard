@@ -29,7 +29,7 @@ WebRTC 的 UDP 规则状态只取本次抽检浏览器的完整程序路径，�
 
 ## 首次配置
 
-1. 下载私有仓库 [1.0 发布页](https://github.com/next1foreal-dotcom/ClaudeGuard/releases/tag/v1.0.11) 的 `ClaudeGuard-1.0.11-win-x64.exe` 并双击；源码用户可运行 `Open-ClaudeGuard.cmd`。没有完成配置时自动进入向导，扫描已安装程序、代理客户端和 HTTP 端口。选择需要保护的程序；核对代理地址。
+1. 下载 [1.0 发布页](https://github.com/next1foreal-dotcom/ClaudeGuard/releases/tag/v1.0.11) 的 `ClaudeGuard-1.0.11-win-x64.exe` 并双击；源码用户可运行 `Open-ClaudeGuard.cmd`。没有完成配置时自动进入向导，扫描已安装程序、代理客户端和 HTTP 端口。选择需要保护的程序；核对代理地址。
 2. 点击“检测出口”。工具检查 FlClash 分流与节点，要求所选服务的检测端点返回相同 IPv4 / 地区，展示出口、地区和节点。检测值不会自动变成批准值。
 3. 勾选出口确认，点击“启用保护”。再次比对检测结果后，请求一次 Windows 管理员授权，登记所选程序的 IPv4 / IPv6 非回环直连阻断规则，完成路由、出口、程序与防火墙核验，最后保存配置并进入面板。管理员操作必须由同一 Windows 用户完成。
 
@@ -100,3 +100,7 @@ powershell.exe -NoProfile -File .\packaging\Test-Release.ps1
 界面图标来自 [Lucide](https://lucide.dev/)，对应官方源版本记录在 `icons/lucide.json`。转换为 WPF 矢量几何后随程序离线加载；保留原始 ISC / MIT 许可于 `icons/LICENSE.txt`。
 
 DNS 诊断在 NetCoffee 无观测时，使用 dnsleak.dev 返回的一次性测试域名经同一 HTTP 代理观测 A / AAAA 解析器；查询结果绑定本次会话与已确认出口。测试域名不预解析、不绕过证书校验，空结果保持未确定。第三方 IP 评分和无公网 WebRTC 候选均不等于全面安全通过。
+
+## 许可证
+
+项目源码按 [MIT License](LICENSE) 开源。Lucide 图标保留原有 ISC / MIT 许可证，见 [icons/LICENSE.txt](icons/LICENSE.txt)。
